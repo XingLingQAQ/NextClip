@@ -5,7 +5,8 @@ import {
   FileText, Link2, Search, Settings, Star, Clock, 
   MoreHorizontal, Scissors, Download, Share2,
   Lock, Eye, EyeOff, Flame, Shield, Smartphone, Monitor,
-  Moon, Sun, Ghost, Send, X, QrCode, LogOut, CheckCircle2
+  Moon, Sun, Ghost, Send, X, QrCode, LogOut, CheckCircle2,
+  RefreshCw, ClipboardPaste, Maximize2, Type
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -91,8 +92,12 @@ export default function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [isIncognito, setIsIncognito] = useState(false);
+  // Settings & Modals State
   const [showSettings, setShowSettings] = useState(false);
+  const [showPairing, setShowPairing] = useState(false);
+  const [showQR, setShowQR] = useState<{show: boolean, content: string}>({show: false, content: ""});
+  const [encryptionKey, setEncryptionKey] = useState("my-secret-key-123");
+  const [retentionHours, setRetentionHours] = useState("24");
 
   // Compose State
   const [composeText, setComposeText] = useState("");
@@ -100,6 +105,21 @@ export default function Home() {
   const [targetDevice, setTargetDevice] = useState<string>("all");
   const [composeSettings, setComposeSettings] = useState({ sensitive: false, burn: false });
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Read Local Clipboard
+  const handleReadClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        setComposeText(text);
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification("Read from clipboard", { body: "Pasted content into compose box." });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to read clipboard contents: ', err);
+    }
+  };
 
   useEffect(() => {
     if (isDarkMode) {
@@ -109,14 +129,14 @@ export default function Home() {
     }
   }, [isDarkMode]);
 
-  const handleCopy = (id: string, content: string, burn: boolean = false) => {
+  const handleCopy = (id: string, content: string, burn: boolean = false, asPlainText: boolean = false) => {
+    // If asPlainText, we would typically strip HTML, but since it's mostly text in mockup, we just write it
     navigator.clipboard.writeText(content);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
     
-    // Trigger desktop notification mockup
     if ("Notification" in window && Notification.permission === "granted") {
-      new Notification("Copied to clipboard", { body: "Content successfully copied." });
+      new Notification("Copied to clipboard", { body: asPlainText ? "Copied as plain text." : "Content successfully copied." });
     }
 
     if (burn) {
@@ -352,6 +372,13 @@ export default function Home() {
                     }}/>
                   </button>
                   <button 
+                    onClick={handleReadClipboard}
+                    className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors"
+                    title="Read Local Clipboard"
+                  >
+                    <ClipboardPaste className="w-4 h-4" />
+                  </button>
+                  <button 
                     onClick={() => setComposeSettings(s => ({...s, sensitive: !s.sensitive}))}
                     className={`p-2 rounded-lg transition-colors ${composeSettings.sensitive ? 'bg-yellow-500/20 text-yellow-600 dark:text-yellow-400' : 'hover:bg-white/20 text-gray-500 dark:text-gray-400'}`}
                     title="Mark as Sensitive (Masked)"
@@ -514,6 +541,23 @@ export default function Home() {
                         <div className="w-4 h-4 bg-white rounded-full"></div>
                       </div>
                     </div>
+                    
+                    <div className="glass-card p-4 rounded-2xl flex items-center justify-between">
+                      <div>
+                        <div className="font-medium flex items-center gap-2"><Clock className="w-4 h-4 text-orange-500" /> Data Retention</div>
+                        <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">Automatically clear unpinned items</div>
+                      </div>
+                      <select 
+                        value={retentionHours}
+                        onChange={(e) => setRetentionHours(e.target.value)}
+                        className="text-xs bg-black/5 dark:bg-white/10 px-2 py-1.5 rounded-lg font-medium outline-none text-gray-900 dark:text-white"
+                      >
+                        <option value="1">1 Hour</option>
+                        <option value="24">24 Hours</option>
+                        <option value="168">7 Days</option>
+                        <option value="never">Never</option>
+                      </select>
+                    </div>
                   </div>
                 </section>
 
@@ -521,7 +565,10 @@ export default function Home() {
                 <section>
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Connected Devices</h3>
-                    <button className="text-xs flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium hover:underline">
+                    <button 
+                      onClick={() => setShowPairing(true)}
+                      className="text-xs flex items-center gap-1 text-blue-600 dark:text-blue-400 font-medium hover:underline"
+                    >
                       <QrCode className="w-3 h-3" /> Pair New Device
                     </button>
                   </div>
@@ -594,7 +641,7 @@ function NavItem({ icon, label, active, onClick, count }: { icon: React.ReactNod
   );
 }
 
-function ClipCard({ clip, onCopy, onDelete, onToggleStar, isCopied }: { clip: Clip, onCopy: () => void, onDelete: () => void, onToggleStar: () => void, isCopied: boolean }) {
+function ClipCard({ clip, onCopy, onDelete, onToggleStar, isCopied }: { clip: Clip, onCopy: (asPlainText?: boolean) => void, onDelete: () => void, onToggleStar: () => void, isCopied: boolean }) {
   const [showSensitive, setShowSensitive] = useState(!clip.isSensitive);
 
   const getIconForType = (type: ClipType) => {
@@ -687,13 +734,34 @@ function ClipCard({ clip, onCopy, onDelete, onToggleStar, isCopied }: { clip: Cl
         </div>
         
         <div className="flex items-center gap-1 bg-white/40 dark:bg-black/40 backdrop-blur-md rounded-xl p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0">
+          <button 
+            onClick={() => {
+               if ("Notification" in window && Notification.permission === "granted") {
+                 new Notification("QR Code Generated", { body: "Ready to scan from other devices." });
+               }
+            }}
+            className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors" title="Generate QR Code"
+          >
+            <QrCode className="w-4 h-4" />
+          </button>
+          
           {clip.isSensitive && showSensitive && (
             <button onClick={() => setShowSensitive(false)} className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors" title="Hide">
               <EyeOff className="w-4 h-4" />
             </button>
           )}
+          
+          {clip.type === 'text' && !clip.isSensitive && (
+             <button 
+               onClick={() => onCopy(true)}
+               className="p-1.5 rounded-lg hover:bg-black/10 dark:hover:bg-white/10 transition-colors" title="Copy as Plain Text"
+             >
+               <Type className="w-4 h-4" />
+             </button>
+          )}
+
           <button 
-            onClick={onCopy}
+            onClick={() => onCopy(false)}
             className={`p-1.5 rounded-lg transition-colors flex items-center gap-1 ${isCopied ? 'bg-green-500/20 text-green-600 dark:text-green-400' : 'hover:bg-black/10 dark:hover:bg-white/10'}`}
             title={clip.burnAfterRead ? "Copy & Burn" : "Copy"}
           >
