@@ -1,0 +1,16 @@
+{
+  "name": "Cloud Clipboard",
+  "short_name": "CloudClip",
+  "description": "A beautiful, fluid glassmorphic clipboard manager.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#3b82f6",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}
