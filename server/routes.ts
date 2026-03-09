@@ -11,6 +11,7 @@ export async function registerRoutes(
   const io = new SocketIOServer(httpServer, {
     cors: { origin: "*" },
     path: "/socket.io",
+    maxHttpBufferSize: 10 * 1024 * 1024,
   });
 
   app.get("/api/rooms/:roomCode/clips", (req, res) => {
@@ -55,9 +56,19 @@ export async function registerRoutes(
       io.to(roomCode).emit("room-users", count);
     });
 
-    socket.on("send-clip", (data: { content: string; type: string; sourceDevice: string }) => {
+    socket.on("send-clip", (data: {
+      content: string;
+      type: string;
+      sourceDevice: string;
+      metadata?: string;
+      isSensitive?: boolean;
+      burnAfterRead?: boolean;
+    }) => {
       if (!currentRoom) return;
-      const clip = storage.createClip(currentRoom, data.content, data.type, data.sourceDevice);
+      const clip = storage.createClip(
+        currentRoom, data.content, data.type, data.sourceDevice,
+        data.metadata, data.isSensitive, data.burnAfterRead
+      );
       const msg: RoomMessage = { type: "clip:new", clip };
       io.to(currentRoom).emit("room-message", msg);
     });

@@ -5,6 +5,9 @@ export interface Clip {
   type: 'text' | 'link' | 'code' | 'image';
   timestamp: string;
   sourceDevice: string;
+  metadata?: string;
+  isSensitive?: boolean;
+  burnAfterRead?: boolean;
 }
 
 export interface RoomMessage {
