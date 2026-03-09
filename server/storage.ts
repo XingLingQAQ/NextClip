@@ -1,13 +1,31 @@
 import Database from "better-sqlite3";
 import path from "path";
-import { type Clip } from "@shared/schema";
+import { type Clip, type RoomInfo, type User } from "@shared/schema";
 import { randomUUID } from "crypto";
 import crypto from "crypto";
 
 const dbPath = path.resolve(process.cwd(), "clipboard.db");
 const db = new Database(dbPath);
-
 db.pragma("journal_mode = WAL");
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    room_code TEXT PRIMARY KEY,
+    password_hash TEXT,
+    owner_id TEXT,
+    expires_at TEXT,
+    created_at TEXT NOT NULL
+  )
+`);
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS clips (
@@ -26,116 +44,133 @@ db.exec(`
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_clips_room ON clips(room_code)`);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS rooms (
-    room_code TEXT PRIMARY KEY,
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  )
-`);
+function ensureColumn(table: string, col: string, def: string) {
+  const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  if (!info.some((c) => c.name === col)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  }
+}
+ensureColumn("clips", "metadata", "TEXT");
+ensureColumn("clips", "is_sensitive", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("clips", "burn_after_read", "INTEGER NOT NULL DEFAULT 0");
+ensureColumn("clips", "attachments", "TEXT");
+ensureColumn("rooms", "owner_id", "TEXT");
+ensureColumn("rooms", "expires_at", "TEXT");
 
-const tableInfo = db.prepare("PRAGMA table_info(clips)").all() as Array<{ name: string }>;
-const columnNames = new Set(tableInfo.map((c) => c.name));
-if (!columnNames.has("metadata")) db.exec("ALTER TABLE clips ADD COLUMN metadata TEXT");
-if (!columnNames.has("is_sensitive")) db.exec("ALTER TABLE clips ADD COLUMN is_sensitive INTEGER NOT NULL DEFAULT 0");
-if (!columnNames.has("burn_after_read")) db.exec("ALTER TABLE clips ADD COLUMN burn_after_read INTEGER NOT NULL DEFAULT 0");
-if (!columnNames.has("attachments")) db.exec("ALTER TABLE clips ADD COLUMN attachments TEXT");
-
-function hashPassword(password: string): string {
-  return crypto.createHash("sha256").update(password).digest("hex");
+function hash(s: string): string {
+  return crypto.createHash("sha256").update(s).digest("hex");
 }
 
-const insertClipStmt = db.prepare(
-  `INSERT INTO clips (id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-);
-const selectByRoomStmt = db.prepare(
-  `SELECT * FROM clips WHERE room_code = ? ORDER BY timestamp DESC LIMIT 200`
-);
-const deleteByIdStmt = db.prepare(`DELETE FROM clips WHERE id = ? AND room_code = ?`);
-const deleteByRoomStmt = db.prepare(`DELETE FROM clips WHERE room_code = ?`);
-const updateClipStmt = db.prepare(`UPDATE clips SET content = ?, type = ? WHERE id = ? AND room_code = ?`);
-
-const getRoomStmt = db.prepare(`SELECT * FROM rooms WHERE room_code = ?`);
-const insertRoomStmt = db.prepare(`INSERT INTO rooms (room_code, password_hash, created_at) VALUES (?, ?, ?)`);
-
-function rowToClip(row: any): Clip {
-  return {
-    id: row.id,
-    roomCode: row.room_code,
-    content: row.content,
-    type: row.type,
-    timestamp: row.timestamp,
-    sourceDevice: row.source_device,
-    metadata: row.metadata || undefined,
-    isSensitive: row.is_sensitive === 1,
-    burnAfterRead: row.burn_after_read === 1,
-    attachments: row.attachments ? JSON.parse(row.attachments) : undefined,
-  };
+function cleanExpiredRooms() {
+  const now = new Date().toISOString();
+  const expired = db.prepare(`SELECT room_code FROM rooms WHERE expires_at IS NOT NULL AND expires_at < ?`).all(now) as Array<{ room_code: string }>;
+  for (const r of expired) {
+    db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(r.room_code);
+    db.prepare(`DELETE FROM rooms WHERE room_code = ?`).run(r.room_code);
+  }
 }
+
+cleanExpiredRooms();
+setInterval(cleanExpiredRooms, 60 * 1000);
 
 export const storage = {
-  createClip(
-    roomCode: string,
-    content: string,
-    type: string,
-    sourceDevice: string,
-    metadata?: string,
-    isSensitive?: boolean,
-    burnAfterRead?: boolean,
-    attachments?: any[]
-  ): Clip {
+  // ===== Users =====
+  createUser(username: string, password: string): User {
     const id = randomUUID();
-    const timestamp = new Date().toISOString();
-    const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
-    insertClipStmt.run(
-      id, roomCode, content, type, timestamp, sourceDevice,
-      metadata || null, isSensitive ? 1 : 0, burnAfterRead ? 1 : 0,
-      attachmentsJson
-    );
+    const createdAt = new Date().toISOString();
+    db.prepare(`INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`)
+      .run(id, username, hash(password), createdAt);
+    return { id, username, createdAt };
+  },
+
+  getUser(username: string): (User & { passwordHash: string }) | null {
+    const row = db.prepare(`SELECT * FROM users WHERE username = ?`).get(username) as any;
+    if (!row) return null;
+    return { id: row.id, username: row.username, createdAt: row.created_at, passwordHash: row.password_hash };
+  },
+
+  verifyUser(username: string, password: string): User | null {
+    const user = this.getUser(username);
+    if (!user || user.passwordHash !== hash(password)) return null;
+    return { id: user.id, username: user.username, createdAt: user.createdAt };
+  },
+
+  getUserById(id: string): User | null {
+    const row = db.prepare(`SELECT * FROM users WHERE id = ?`).get(id) as any;
+    if (!row) return null;
+    return { id: row.id, username: row.username, createdAt: row.created_at };
+  },
+
+  // ===== Rooms =====
+  getRoom(roomCode: string): RoomInfo | null {
+    const row = db.prepare(`SELECT * FROM rooms WHERE room_code = ?`).get(roomCode) as any;
+    if (!row) return null;
     return {
-      id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
-      metadata: metadata || undefined,
-      isSensitive: isSensitive || false,
-      burnAfterRead: burnAfterRead || false,
-      attachments: attachments || undefined,
+      roomCode: row.room_code,
+      hasPassword: !!row.password_hash,
+      expiresAt: row.expires_at,
+      ownerId: row.owner_id,
     };
   },
 
-  updateClip(id: string, roomCode: string, content: string, type: string): boolean {
-    const result = updateClipStmt.run(content, type, id, roomCode);
-    return result.changes > 0;
-  },
-
-  getClipsByRoom(roomCode: string): Clip[] {
-    return selectByRoomStmt.all(roomCode).map(rowToClip);
-  },
-
-  deleteClip(id: string, roomCode: string): boolean {
-    return deleteByIdStmt.run(id, roomCode).changes > 0;
-  },
-
-  clearRoom(roomCode: string): number {
-    return deleteByRoomStmt.run(roomCode).changes;
-  },
-
-  getRoom(roomCode: string): { roomCode: string; passwordHash: string } | null {
-    const row = getRoomStmt.get(roomCode) as any;
-    if (!row) return null;
-    return { roomCode: row.room_code, passwordHash: row.password_hash };
-  },
-
-  createRoom(roomCode: string, password: string): void {
-    insertRoomStmt.run(roomCode, hashPassword(password), new Date().toISOString());
+  createRoom(roomCode: string, ownerId?: string, password?: string, expiresAt?: string): RoomInfo {
+    db.prepare(`INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(roomCode, password ? hash(password) : null, ownerId || null, expiresAt || null, new Date().toISOString());
+    return { roomCode, hasPassword: !!password, expiresAt: expiresAt || null, ownerId: ownerId || null };
   },
 
   verifyRoomPassword(roomCode: string, password: string): boolean {
-    const room = this.getRoom(roomCode);
-    if (!room) return false;
-    return room.passwordHash === hashPassword(password);
+    const row = db.prepare(`SELECT password_hash FROM rooms WHERE room_code = ?`).get(roomCode) as any;
+    if (!row || !row.password_hash) return false;
+    return row.password_hash === hash(password);
+  },
+
+  setRoomPassword(roomCode: string, password: string | null): void {
+    db.prepare(`UPDATE rooms SET password_hash = ? WHERE room_code = ?`)
+      .run(password ? hash(password) : null, roomCode);
+  },
+
+  setRoomExpiry(roomCode: string, expiresAt: string | null): void {
+    db.prepare(`UPDATE rooms SET expires_at = ? WHERE room_code = ?`).run(expiresAt, roomCode);
   },
 
   roomExists(roomCode: string): boolean {
     return this.getRoom(roomCode) !== null;
+  },
+
+  // ===== Clips =====
+  createClip(roomCode: string, content: string, type: string, sourceDevice: string,
+    metadata?: string, isSensitive?: boolean, burnAfterRead?: boolean, attachments?: any[]): Clip {
+    const id = randomUUID();
+    const timestamp = new Date().toISOString();
+    const attJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
+    db.prepare(`INSERT INTO clips (id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(id, roomCode, content, type, timestamp, sourceDevice, metadata || null, isSensitive ? 1 : 0, burnAfterRead ? 1 : 0, attJson);
+    return { id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
+      metadata: metadata || undefined, isSensitive: !!isSensitive, burnAfterRead: !!burnAfterRead,
+      attachments: attachments || undefined };
+  },
+
+  updateClip(id: string, roomCode: string, content: string, type: string): boolean {
+    return db.prepare(`UPDATE clips SET content = ?, type = ? WHERE id = ? AND room_code = ?`).run(content, type, id, roomCode).changes > 0;
+  },
+
+  getClipsByRoom(roomCode: string): Clip[] {
+    const rows = db.prepare(`SELECT * FROM clips WHERE room_code = ? ORDER BY timestamp DESC LIMIT 200`).all(roomCode) as any[];
+    return rows.map((r) => ({
+      id: r.id, roomCode: r.room_code, content: r.content, type: r.type, timestamp: r.timestamp,
+      sourceDevice: r.source_device, metadata: r.metadata || undefined,
+      isSensitive: r.is_sensitive === 1, burnAfterRead: r.burn_after_read === 1,
+      attachments: r.attachments ? JSON.parse(r.attachments) : undefined,
+    }));
+  },
+
+  deleteClip(id: string, roomCode: string): boolean {
+    return db.prepare(`DELETE FROM clips WHERE id = ? AND room_code = ?`).run(id, roomCode).changes > 0;
+  },
+
+  clearRoom(roomCode: string): number {
+    return db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(roomCode).changes;
   },
 };

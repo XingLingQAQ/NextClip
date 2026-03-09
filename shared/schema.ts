@@ -23,10 +23,17 @@ export interface RoomMessage {
   clip?: Clip;
   clipId?: string;
   clips?: Clip[];
-  roomCode?: string;
 }
 
 export interface RoomInfo {
   roomCode: string;
   hasPassword: boolean;
+  expiresAt: string | null;
+  ownerId: string | null;
+}
+
+export interface User {
+  id: string;
+  username: string;
+  createdAt: string;
 }

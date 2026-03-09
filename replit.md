@@ -25,7 +25,7 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `client/src/App.tsx` — Router setup with wouter
 
 ## Core Features
-1. **Room-based sync with password**: Enter room code + 6-char password to create or join a room
+1. **Room-based sync**: Enter room code to join/create. Password optional — only prompted when room has one set
 2. **Real-time updates**: Socket.io broadcasts new clips, deletes, clears, updates to all room members
 3. **Mixed content clips**: A single clip can contain text + images + files together
 4. **File/Image upload**: Drag-drop or file picker; attachments preview in compose area before sending
@@ -41,12 +41,16 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 14. **Lock screen**: PIN-based app lock
 15. **Incognito mode**: Visual indicator for privacy-conscious usage
 16. **Dark/Light theme**: Full theme support with glassmorphism design
+17. **User accounts**: Login/register for unlocking permanent room creation
+18. **Room expiry**: Configurable auto-destroy (1h/24h/7d/30d/permanent). Only logged-in users can set permanent
+19. **Room tokens**: Server issues access tokens on successful join; socket.io validates tokens before sending data
 
 ## Database
 - SQLite file: `clipboard.db` (gitignored)
 - Tables:
+  - `users`: id, username, password_hash (SHA-256), created_at
   - `clips`: id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments (JSON)
-  - `rooms`: room_code, password_hash (SHA-256), created_at
+  - `rooms`: room_code, password_hash (SHA-256, nullable), owner_id, expires_at, created_at
 - Auto-migration on startup for schema changes
 
 ## Socket.io Events
