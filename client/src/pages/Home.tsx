@@ -202,7 +202,7 @@ export default function Home() {
 
   if (isLocked) {
     return (
-      <div className="min-h-screen p-4 flex items-center justify-center font-sans relative overflow-hidden bg-black/50">
+      <div className="min-h-screen min-h-[100dvh] p-4 flex items-center justify-center font-sans relative overflow-hidden bg-black/50">
         <div className="absolute inset-0 backdrop-blur-xl z-0" />
         <motion.div 
           initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
@@ -234,7 +234,7 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen p-2 sm:p-4 md:p-8 lg:p-12 flex items-center justify-center font-sans text-gray-900 dark:text-white transition-colors duration-500">
+    <div className="min-h-screen p-0 md:p-4 lg:p-12 flex items-center justify-center font-sans text-gray-900 dark:text-white transition-colors duration-500 overflow-hidden">
       
       {/* Background incognito indicator */}
       <AnimatePresence>
@@ -250,11 +250,11 @@ export default function Home() {
         initial={{ opacity: 0, y: 20, scale: 0.98 }}
         animate={{ opacity: 1, y: 0, scale: 1 }}
         transition={{ duration: 0.6, ease: [0.16, 1, 0.3, 1] }}
-        className="w-full max-w-7xl h-[90vh] glass-panel rounded-3xl overflow-hidden flex flex-col md:flex-row shadow-2xl relative z-10"
+        className="w-full max-w-7xl h-[100dvh] md:h-[90vh] md:rounded-3xl overflow-hidden flex flex-col md:flex-row glass-panel shadow-2xl relative z-10"
       >
         {/* Sidebar */}
-        <div className="w-full md:w-64 border-b md:border-b-0 md:border-r border-white/20 p-5 flex flex-col bg-white/10 dark:bg-black/20 backdrop-blur-xl">
-          <div className="flex items-center justify-between mb-8 px-2">
+        <div className="w-full md:w-64 md:flex-shrink-0 border-b md:border-b-0 md:border-r border-white/20 p-4 md:p-5 flex flex-col bg-white/10 dark:bg-black/20 backdrop-blur-xl">
+          <div className="flex items-center justify-between mb-2 md:mb-8 px-2">
             <div className="flex items-center gap-3">
               <div className={`w-8 h-8 rounded-xl bg-gradient-to-tr ${isIncognito ? 'from-purple-500 to-indigo-600' : 'from-blue-500 to-cyan-400'} flex items-center justify-center shadow-lg transition-colors`}>
                 {isIncognito ? <Ghost className="w-4 h-4 text-white" /> : <Scissors className="w-4 h-4 text-white" />}
@@ -263,20 +263,20 @@ export default function Home() {
             </div>
           </div>
 
-          <nav className="space-y-1 flex-1 overflow-y-auto pr-2 pb-4 scrollbar-hide">
-            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">Library</div>
+          <nav className="flex-row overflow-x-auto md:flex-col space-y-0 md:space-y-1 flex-none md:flex-1 md:overflow-y-auto pb-1 md:pb-4 scrollbar-hide flex md:block gap-2 items-center -mx-4 px-4 md:mx-0 md:px-0">
+            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">Library</div>
             <NavItem icon={<Clock />} label="Recent" active={activeFilter === 'all'} onClick={() => setActiveFilter('all')} />
             <NavItem icon={<Star />} label="Favorites" active={activeFilter === 'starred'} onClick={() => setActiveFilter('starred')} />
             
-            <div className="h-px w-full bg-white/20 my-4" />
-            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">Types</div>
+            <div className="hidden md:block h-px w-full bg-white/20 my-4" />
+            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">Types</div>
             <NavItem icon={<FileText />} label="Texts" active={activeFilter === 'text'} onClick={() => setActiveFilter('text')} count={clips.filter(c => c.type === 'text').length} />
             <NavItem icon={<Link2 />} label="Links" active={activeFilter === 'link'} onClick={() => setActiveFilter('link')} count={clips.filter(c => c.type === 'link').length} />
             <NavItem icon={<ImageIcon />} label="Images" active={activeFilter === 'image'} onClick={() => setActiveFilter('image')} count={clips.filter(c => c.type === 'image').length} />
             <NavItem icon={<Scissors />} label="Snippets" active={activeFilter === 'code'} onClick={() => setActiveFilter('code')} count={clips.filter(c => c.type === 'code').length} />
           </nav>
 
-          <div className="mt-auto pt-4 space-y-2 border-t border-white/20">
+          <div className="hidden md:block mt-4 pt-4 space-y-2 border-t border-white/20 md:mt-auto">
             <div className="flex gap-2">
               <button 
                 onClick={() => setIsIncognito(!isIncognito)}
@@ -302,16 +302,16 @@ export default function Home() {
             </div>
             <button 
               onClick={() => setShowSettings(true)}
-              className="flex items-center gap-3 px-4 py-3 rounded-xl w-full text-sm font-medium bg-white/10 hover:bg-white/20 text-gray-700 dark:text-gray-200 transition-colors"
+              className="flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-xl w-full text-sm font-medium bg-white/10 hover:bg-white/20 text-gray-700 dark:text-gray-200 transition-colors"
             >
               <Settings className="w-4 h-4" />
-              Settings & Devices
+              <span className="hidden md:inline">Settings & Devices</span>
             </button>
           </div>
         </div>
 
         {/* Main Content */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white/5 dark:bg-black/5">
+        <div className="flex-1 flex flex-col min-w-0 bg-white/5 dark:bg-black/5 pb-[80px] md:pb-0 h-full">
           {/* Header & Compose Area */}
           <header className="p-4 sm:p-6 pb-2">
             <div 
@@ -439,16 +439,48 @@ export default function Home() {
         </div>
       </motion.div>
 
+      {/* Mobile Bottom Bar for Settings/Lock (since hidden in sidebar) */}
+      <div 
+        className="md:hidden fixed bottom-0 left-0 right-0 px-4 pt-3 bg-white/80 dark:bg-black/80 backdrop-blur-xl border-t border-white/20 z-40 flex justify-around items-center"
+        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0.75rem))' }}
+      >
+         <button 
+            onClick={() => setIsIncognito(!isIncognito)}
+            className={`p-3 rounded-xl transition-all ${isIncognito ? 'bg-purple-500/20 text-purple-600 dark:text-purple-400' : 'text-gray-600 dark:text-gray-300'}`}
+          >
+            <Ghost className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setIsDarkMode(!isDarkMode)}
+            className="p-3 rounded-xl text-gray-600 dark:text-gray-300 transition-all"
+          >
+            {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
+          </button>
+          <button 
+            onClick={() => setShowSettings(true)}
+            className="p-3 rounded-xl text-gray-600 dark:text-gray-300 transition-all"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          <button 
+            onClick={() => setIsLocked(true)}
+            className="p-3 rounded-xl text-gray-600 dark:text-gray-300 transition-all"
+          >
+            <Lock className="w-5 h-5" />
+          </button>
+      </div>
+
       {/* Settings & Devices Modal */}
       <AnimatePresence>
         {showSettings && (
           <motion.div 
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-black/40 backdrop-blur-sm"
           >
             <motion.div 
-              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
-              className="bg-white/80 dark:bg-black/80 backdrop-blur-2xl border border-white/20 w-full max-w-2xl rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[85vh]"
+              initial={{ y: "100%" }} animate={{ y: 0 }} exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="bg-white/80 dark:bg-black/80 backdrop-blur-2xl border border-white/20 w-full max-w-2xl rounded-t-3xl md:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh] md:max-h-[85vh]"
             >
               <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
                 <h2 className="text-xl font-bold flex items-center gap-2">
@@ -540,21 +572,21 @@ function NavItem({ icon, label, active, onClick, count }: { icon: React.ReactNod
   return (
     <button 
       onClick={onClick}
-      className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200
+      className={`whitespace-nowrap flex-none md:w-full flex items-center justify-center md:justify-between px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200
         ${active 
           ? 'bg-white/40 dark:bg-white/10 text-gray-900 dark:text-white shadow-sm' 
           : 'text-gray-600 dark:text-gray-400 hover:bg-white/20 dark:hover:bg-white/5'
         }
       `}
     >
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 md:gap-3">
         <div className={`opacity-80 ${active ? 'opacity-100 text-blue-600 dark:text-blue-400' : ''}`}>
           {icon}
         </div>
-        {label}
+        <span className="md:inline">{label}</span>
       </div>
       {count !== undefined && (
-        <span className={`text-[10px] font-bold py-0.5 px-2 rounded-full ${active ? 'bg-white/50 dark:bg-white/20' : 'bg-black/5 dark:bg-white/5'}`}>
+        <span className={`hidden md:inline-block text-[10px] font-bold py-0.5 px-2 rounded-full ${active ? 'bg-white/50 dark:bg-white/20' : 'bg-black/5 dark:bg-white/5'}`}>
           {count}
         </span>
       )}

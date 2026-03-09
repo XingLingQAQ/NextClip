@@ -8,12 +8,12 @@ export default function Landing() {
   const [isHovered, setIsHovered] = useState(false);
 
   return (
-    <div className="min-h-screen relative flex flex-col font-sans text-gray-900 dark:text-white transition-colors duration-500 overflow-hidden">
+    <div className="min-h-screen min-h-[100dvh] relative flex flex-col font-sans text-gray-900 dark:text-white transition-colors duration-500 overflow-hidden">
       {/* Background with blur */}
       <div className="absolute inset-0 z-0 bg-black/10 dark:bg-black/40 backdrop-blur-sm pointer-events-none" />
       
       {/* Navigation */}
-      <nav className="relative z-10 w-full p-6 flex justify-between items-center max-w-7xl mx-auto">
+      <nav className="relative z-10 w-full p-4 sm:p-6 flex justify-between items-center max-w-7xl mx-auto">
         <div className="flex items-center gap-2">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg">
             <Cloud className="w-5 h-5 text-white" />
@@ -33,7 +33,7 @@ export default function Landing() {
       </nav>
 
       {/* Hero Section */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-4 sm:px-6 mt-[-60px]">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-4 sm:px-6 mt-[-40px] md:mt-[-60px]">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -45,7 +45,7 @@ export default function Landing() {
             End-to-End Encrypted Clipboard
           </div>
           
-          <h1 className="text-5xl sm:text-6xl md:text-8xl font-extrabold tracking-tight text-white mb-6 drop-shadow-xl leading-tight">
+          <h1 className="text-4xl sm:text-6xl md:text-8xl font-extrabold tracking-tight text-white mb-6 drop-shadow-xl leading-tight">
             Sync across <br/> <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-300 to-purple-400">every device.</span>
           </h1>
           
@@ -72,7 +72,7 @@ export default function Landing() {
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.2, ease: "easeOut" }}
-          className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl mt-24"
+          className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-5xl mt-16 md:mt-24 mb-16 md:mb-0"
         >
           <FeatureCard 
             icon={<Zap className="w-6 h-6 text-yellow-400" />}
