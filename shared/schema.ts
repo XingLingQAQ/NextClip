@@ -1,18 +1,16 @@
-import { sql } from "drizzle-orm";
-import { pgTable, text, varchar } from "drizzle-orm/pg-core";
-import { createInsertSchema } from "drizzle-zod";
-import { z } from "zod";
+export interface Clip {
+  id: string;
+  roomCode: string;
+  content: string;
+  type: 'text' | 'link' | 'code' | 'image';
+  timestamp: string;
+  sourceDevice: string;
+}
 
-export const users = pgTable("users", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  username: text("username").notNull().unique(),
-  password: text("password").notNull(),
-});
-
-export const insertUserSchema = createInsertSchema(users).pick({
-  username: true,
-  password: true,
-});
-
-export type InsertUser = z.infer<typeof insertUserSchema>;
-export type User = typeof users.$inferSelect;
+export interface RoomMessage {
+  type: 'clip:new' | 'clip:delete' | 'clip:clear' | 'clip:history';
+  clip?: Clip;
+  clipId?: string;
+  clips?: Clip[];
+  roomCode?: string;
+}
