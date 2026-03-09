@@ -33,6 +33,13 @@ export default function Landing() {
           >
             Security
           </button>
+          <button
+            onClick={() => setLocation("/login")}
+            className="text-sm font-medium text-white/80 hover:text-white transition-colors px-3 py-2"
+            data-testid="link-landing-login"
+          >
+            Log in
+          </button>
           <button 
             onClick={() => setLocation("/app")}
             className="text-sm font-medium bg-white/20 hover:bg-white/30 backdrop-blur-md text-white px-4 sm:px-5 py-2 rounded-xl transition-all border border-white/20 shadow-[0_0_15px_rgba(255,255,255,0.1)] whitespace-nowrap"

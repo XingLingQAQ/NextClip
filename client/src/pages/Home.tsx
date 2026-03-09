@@ -6,7 +6,7 @@ import {
   RefreshCw, ClipboardPaste, FileText, Link2, Image as ImageIcon,
   Shield, Flame, CheckCircle2, Eye, EyeOff, Users,
   LogIn, Smartphone, Hash, LogOut, Download, Maximize2,
-  Paperclip, File, UserPlus, User as UserIcon, Timer, Unlock
+  Paperclip, File, User as UserIcon, Timer, Unlock
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { Clip, RoomMessage, Attachment, User } from "@shared/schema";
@@ -102,12 +102,6 @@ export default function Home() {
     const saved = localStorage.getItem("cloudclip-user");
     return saved ? JSON.parse(saved) : null;
   });
-  const [showAuth, setShowAuth] = useState(false);
-  const [authTab, setAuthTab] = useState<"login" | "register">("login");
-  const [authUsername, setAuthUsername] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authError, setAuthError] = useState("");
-  const [authLoading, setAuthLoading] = useState(false);
 
   const [roomCode, setRoomCode] = useState(() => localStorage.getItem("cloudclip-room") || "");
   const [roomInput, setRoomInput] = useState("");
@@ -121,8 +115,6 @@ export default function Home() {
   const [onlineCount, setOnlineCount] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const roomTokenRef = useRef<string>("");
-
-  const [roomExpiry, setRoomExpiry] = useState("24");
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [starredIds, setStarredIds] = useState<Set<string>>(() => {
@@ -151,11 +143,6 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
   }, [starredIds]);
-
-  useEffect(() => {
-    if (currentUser) localStorage.setItem("cloudclip-user", JSON.stringify(currentUser));
-    else localStorage.removeItem("cloudclip-user");
-  }, [currentUser]);
 
   const connectSocket = useCallback((code: string, token?: string) => {
     if (token) roomTokenRef.current = token;
@@ -187,10 +174,7 @@ export default function Home() {
       const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          expiryHours: roomExpiry,
-          userId: currentUser?.id,
-        }),
+        body: JSON.stringify({}),
       });
 
       const data = await res.json();
@@ -292,36 +276,6 @@ export default function Home() {
     if (isDarkMode) document.documentElement.classList.add("dark");
     else document.documentElement.classList.remove("dark");
   }, [isDarkMode]);
-
-  const handleAuth = async () => {
-    if (!authUsername.trim() || !authPassword.trim()) {
-      setAuthError("Please fill all fields");
-      return;
-    }
-    setAuthLoading(true);
-    setAuthError("");
-    try {
-      const endpoint = authTab === "login" ? "/api/auth/login" : "/api/auth/register";
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: authUsername.trim(), password: authPassword }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setAuthError(data.message || "Failed");
-        setAuthLoading(false);
-        return;
-      }
-      setCurrentUser(data.user);
-      setShowAuth(false);
-      setAuthUsername("");
-      setAuthPassword("");
-    } catch {
-      setAuthError("Network error");
-    }
-    setAuthLoading(false);
-  };
 
   const handleReadClipboard = async () => {
     try { const text = await navigator.clipboard.readText(); if (text) setComposeText(text); }
@@ -491,27 +445,8 @@ export default function Home() {
           <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500 to-cyan-400 flex items-center justify-center mb-6 shadow-lg">
             <Scissors className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-1" data-testid="text-app-title">CloudClip</h2>
-
-          {/* User bar */}
-          <div className="mb-5 mt-1">
-            {currentUser ? (
-              <div className="flex items-center gap-2 text-sm text-gray-300">
-                <UserIcon className="w-4 h-4 text-blue-400" />
-                <span className="font-medium text-white">{currentUser.username}</span>
-                <button onClick={() => setCurrentUser(null)}
-                  className="text-xs text-gray-500 hover:text-red-400 ml-1 transition-colors">Log out</button>
-              </div>
-            ) : (
-              <button onClick={() => { setShowAuth(true); setAuthError(""); }}
-                className="flex items-center gap-1.5 text-sm text-blue-400 hover:text-blue-300 transition-colors"
-                data-testid="button-open-auth">
-                <UserIcon className="w-4 h-4" /> Log in / Sign up
-              </button>
-            )}
-          </div>
-
-          <p className="text-gray-300 text-sm mb-5 text-center">
+          <h2 className="text-2xl font-bold text-white mb-2" data-testid="text-app-title">CloudClip</h2>
+          <p className="text-gray-300 text-sm mb-6 text-center">
             Enter a room code to join or create a room
           </p>
 
@@ -524,34 +459,6 @@ export default function Home() {
                 placeholder="Room Code" data-testid="input-room-code" />
             </div>
 
-            {/* Room Expiry Selector */}
-            <div>
-              <label className="text-xs text-gray-400 mb-1.5 block flex items-center gap-1">
-                <Timer className="w-3 h-3" /> Room expires after (for new rooms)
-              </label>
-              <div className="flex flex-wrap gap-1.5">
-                {EXPIRY_OPTIONS.map((opt) => {
-                  const disabled = opt.value === "permanent" && !currentUser;
-                  return (
-                    <button key={opt.value}
-                      onClick={() => !disabled && setRoomExpiry(opt.value)}
-                      disabled={disabled}
-                      className={`text-xs px-3 py-1.5 rounded-lg transition-all border
-                        ${roomExpiry === opt.value
-                          ? "bg-blue-500/30 border-blue-400/50 text-blue-300"
-                          : disabled
-                            ? "bg-white/5 border-white/10 text-gray-600 cursor-not-allowed"
-                            : "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20"}`}
-                      title={disabled ? "Login required for permanent rooms" : ""}
-                      data-testid={`button-expiry-${opt.value}`}>
-                      {opt.label}
-                      {disabled && <Lock className="w-2.5 h-2.5 inline ml-1 opacity-50" />}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
             {joinError && <p className="text-red-400 text-xs text-center">{joinError}</p>}
 
             <button onClick={handleJoinRoom}
@@ -562,64 +469,24 @@ export default function Home() {
               {joining ? "Joining..." : "Join Room"}
             </button>
           </div>
+
+          <div className="mt-6 pt-4 border-t border-white/10 w-full text-center">
+            {currentUser ? (
+              <div className="flex items-center justify-center gap-2 text-sm text-gray-300">
+                <UserIcon className="w-4 h-4 text-blue-400" />
+                <span className="font-medium text-white">{currentUser.username}</span>
+                <button onClick={() => { setCurrentUser(null); localStorage.removeItem("cloudclip-user"); }}
+                  className="text-xs text-gray-500 hover:text-red-400 ml-1 transition-colors">Log out</button>
+              </div>
+            ) : (
+              <div className="flex items-center justify-center gap-3 text-sm">
+                <a href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-login">Log in</a>
+                <span className="text-gray-600">|</span>
+                <a href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-register">Sign up</a>
+              </div>
+            )}
+          </div>
         </motion.div>
-
-        {/* ===== Auth Modal ===== */}
-        <AnimatePresence>
-          {showAuth && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-              onClick={(e) => { if (e.target === e.currentTarget) setShowAuth(false); }}>
-              <motion.div initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
-                className="glass-panel p-6 rounded-3xl w-full max-w-sm border border-white/20 shadow-2xl">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-xl font-bold text-white">{authTab === "login" ? "Log In" : "Sign Up"}</h2>
-                  <button onClick={() => setShowAuth(false)} className="p-2 rounded-full hover:bg-white/10 text-gray-400"><X className="w-5 h-5" /></button>
-                </div>
-
-                <div className="flex bg-white/10 rounded-xl p-1 mb-5">
-                  <button onClick={() => { setAuthTab("login"); setAuthError(""); }}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authTab === "login" ? "bg-white/20 text-white shadow-sm" : "text-gray-400"}`}>
-                    <LogIn className="w-4 h-4 inline mr-1.5" />Log In
-                  </button>
-                  <button onClick={() => { setAuthTab("register"); setAuthError(""); }}
-                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-all ${authTab === "register" ? "bg-white/20 text-white shadow-sm" : "text-gray-400"}`}>
-                    <UserPlus className="w-4 h-4 inline mr-1.5" />Sign Up
-                  </button>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="relative">
-                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input type="text" value={authUsername} onChange={(e) => setAuthUsername(e.target.value)}
-                      className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
-                      placeholder="Username" data-testid="input-auth-username" />
-                  </div>
-                  <div className="relative">
-                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
-                    <input type="password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") handleAuth(); }}
-                      className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
-                      placeholder="Password" data-testid="input-auth-password" />
-                  </div>
-
-                  {authError && <p className="text-red-400 text-xs text-center">{authError}</p>}
-
-                  <button onClick={handleAuth} disabled={authLoading}
-                    className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold shadow-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-                    data-testid="button-auth-submit">
-                    {authLoading && <RefreshCw className="w-4 h-4 animate-spin" />}
-                    {authTab === "login" ? "Log In" : "Create Account"}
-                  </button>
-                </div>
-
-                <p className="text-xs text-gray-500 text-center mt-4">
-                  {authTab === "login" ? "Logged in users can create permanent rooms" : "Create an account to unlock permanent rooms"}
-                </p>
-              </motion.div>
-            </motion.div>
-          )}
-        </AnimatePresence>
       </div>
     );
   }
