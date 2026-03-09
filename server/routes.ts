@@ -49,7 +49,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/rooms/:roomCode", (req, res) => {
     const room = storage.getRoom(req.params.roomCode);
     if (!room) return res.json({ exists: false });
-    res.json({ exists: true, hasPassword: room.hasPassword, expiresAt: room.expiresAt });
+    res.json({ exists: true, hasPassword: room.hasPassword, expiresAt: room.expiresAt, createdAt: room.createdAt });
   });
 
   app.post("/api/rooms/:roomCode/join", (req, res) => {

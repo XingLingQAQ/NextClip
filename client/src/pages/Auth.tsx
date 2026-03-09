@@ -80,7 +80,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
           <div className="relative">
             <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
+              className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
               placeholder="Username" data-testid="input-auth-username" />
           </div>
 
@@ -88,7 +88,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
             <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && isLogin) handleSubmit(); }}
-              className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
+              className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
               placeholder="Password" data-testid="input-auth-password" />
           </div>
 
@@ -97,7 +97,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
               <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
-                className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
+                className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
                 placeholder="Confirm Password" data-testid="input-auth-confirm" />
             </div>
           )}

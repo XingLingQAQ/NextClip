@@ -30,6 +30,7 @@ export interface RoomInfo {
   hasPassword: boolean;
   expiresAt: string | null;
   ownerId: string | null;
+  createdAt?: string;
 }
 
 export interface User {

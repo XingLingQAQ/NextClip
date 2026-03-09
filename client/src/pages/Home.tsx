@@ -6,7 +6,8 @@ import {
   RefreshCw, ClipboardPaste, FileText, Link2, Image as ImageIcon,
   Shield, Flame, CheckCircle2, Eye, EyeOff, Users,
   LogIn, Smartphone, Hash, LogOut, Download, Maximize2,
-  Paperclip, File, User as UserIcon, Timer, Unlock
+  Paperclip, File, User as UserIcon, Timer, Unlock,
+  ArrowRight, ArrowLeft, Sparkles
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { Clip, RoomMessage, Attachment, User } from "@shared/schema";
@@ -79,7 +80,7 @@ function PinInput({ value, onChange, length = 6 }: { value: string; onChange: (v
           onChange={(e) => handleChange(i, e.target.value)}
           onKeyDown={(e) => handleKeyDown(i, e)}
           onPaste={handlePaste}
-          className="w-11 h-13 bg-white/10 border border-white/20 rounded-xl text-center text-white text-xl font-bold outline-none focus:bg-white/20 focus:border-blue-400 transition-all"
+          className="w-11 h-13 bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl text-center text-gray-900 dark:text-white text-xl font-bold outline-none focus:bg-black/10 dark:focus:bg-white/20 focus:border-blue-400 transition-all"
           data-testid={`input-pin-${i}`} />
       ))}
     </div>
@@ -94,9 +95,44 @@ const EXPIRY_OPTIONS = [
   { label: "Permanent", value: "permanent" },
 ];
 
+const ONBOARDING_STEPS = [
+  {
+    icon: Scissors,
+    title: "Welcome to CloudClip",
+    desc: "Your cross-platform cloud clipboard. Copy and sync text, images, and files across all your devices in real time.",
+    color: "from-blue-500 to-cyan-400",
+  },
+  {
+    icon: Hash,
+    title: "Room-Based Sync",
+    desc: "Enter any room code to create or join a room. Share the code with your other devices or teammates to sync clips instantly.",
+    color: "from-green-500 to-emerald-400",
+  },
+  {
+    icon: Shield,
+    title: "Privacy & Security",
+    desc: "Set a room password, mark clips as sensitive, enable burn-after-read, or go incognito. Your data stays private.",
+    color: "from-purple-500 to-indigo-400",
+  },
+  {
+    icon: Paperclip,
+    title: "Mixed Content",
+    desc: "Paste text, drag & drop images, or upload files. CloudClip handles all content types with full preview and download support.",
+    color: "from-orange-500 to-amber-400",
+  },
+  {
+    icon: UserIcon,
+    title: "Create an Account",
+    desc: "Sign up to unlock permanent rooms and more features. You can also use CloudClip without an account — just join a room!",
+    color: "from-pink-500 to-rose-400",
+  },
+];
+
 export default function Home() {
   const [isLocked, setIsLocked] = useState(false);
   const [lockPin, setLockPin] = useState("");
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem("cloudclip-onboarded"));
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem("cloudclip-user");
@@ -371,6 +407,56 @@ export default function Home() {
     return matchesSearch && matchesFilter;
   });
 
+  // ==================== ONBOARDING ====================
+  if (showOnboarding) {
+    const step = ONBOARDING_STEPS[onboardingStep];
+    const StepIcon = step.icon;
+    const isLast = onboardingStep === ONBOARDING_STEPS.length - 1;
+    return (
+      <div className="min-h-screen min-h-[100dvh] p-4 flex items-center justify-center font-sans relative overflow-hidden">
+        <motion.div key={onboardingStep} initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -60 }}
+          transition={{ duration: 0.4, ease: "easeOut" }}
+          className="glass-panel p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/20">
+          <div className={`w-20 h-20 rounded-2xl bg-gradient-to-tr ${step.color} flex items-center justify-center mb-6 shadow-lg`}>
+            <StepIcon className="w-10 h-10 text-white" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 text-center" data-testid="text-onboarding-title">{step.title}</h2>
+          <p className="text-gray-500 dark:text-gray-300 text-sm mb-8 text-center leading-relaxed">{step.desc}</p>
+
+          <div className="flex items-center gap-1.5 mb-6">
+            {ONBOARDING_STEPS.map((_, i) => (
+              <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === onboardingStep ? "w-6 bg-blue-500" : "w-1.5 bg-gray-300 dark:bg-white/20"}`} />
+            ))}
+          </div>
+
+          <div className="flex gap-3 w-full">
+            {onboardingStep > 0 && (
+              <button onClick={() => setOnboardingStep((s) => s - 1)}
+                className="flex-1 py-3 rounded-xl border border-gray-200 dark:border-white/20 text-gray-700 dark:text-gray-300 font-medium hover:bg-black/5 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
+                data-testid="button-onboarding-back">
+                <ArrowLeft className="w-4 h-4" /> Back
+              </button>
+            )}
+            <button onClick={() => {
+              if (isLast) { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); }
+              else setOnboardingStep((s) => s + 1);
+            }}
+              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
+              data-testid="button-onboarding-next">
+              {isLast ? "Get Started" : "Next"} {isLast ? <Sparkles className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
+            </button>
+          </div>
+
+          <button onClick={() => { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); }}
+            className="mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
+            data-testid="button-onboarding-skip">
+            Skip
+          </button>
+        </motion.div>
+      </div>
+    );
+  }
+
   // ==================== LOCK SCREEN ====================
   if (isLocked) {
     return (
@@ -385,7 +471,7 @@ export default function Home() {
           <p className="text-gray-300 text-sm mb-8 text-center">Enter your PIN to unlock</p>
           <input type="password" value={lockPin} onChange={(e) => setLockPin(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") setIsLocked(false); }}
-            className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-center text-white tracking-[0.5em] text-xl outline-none focus:bg-white/20 transition-colors mb-6"
+            className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl px-4 py-3 text-center text-gray-900 dark:text-white tracking-[0.5em] text-xl outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors mb-6"
             placeholder="••••" data-testid="input-lock-pin" />
           <button onClick={() => setIsLocked(false)}
             className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors"
@@ -455,7 +541,7 @@ export default function Home() {
               <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input type="text" value={roomInput} onChange={(e) => setRoomInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleJoinRoom(); }}
-                className="w-full bg-white/10 border border-white/20 rounded-xl pl-10 pr-4 py-3 text-white text-lg outline-none focus:bg-white/20 transition-colors placeholder-gray-400"
+                className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white text-lg outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
                 placeholder="Room Code" data-testid="input-room-code" />
             </div>
 
@@ -551,9 +637,6 @@ export default function Home() {
               <button onClick={() => setIsDarkMode(!isDarkMode)}
                 className="flex-1 flex items-center justify-center py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300 transition-all"
                 title="Toggle Theme">{isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>
-              <button onClick={() => setIsLocked(true)}
-                className="flex-1 flex items-center justify-center py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300 transition-all"
-                title="Lock App"><Lock className="w-4 h-4" /></button>
             </div>
             <button onClick={() => setShowSettings(true)}
               className="flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-xl w-full text-sm font-medium bg-white/10 hover:bg-white/20 text-gray-700 dark:text-gray-200 transition-colors">
@@ -791,12 +874,24 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
   const [hasPassword, setHasPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [savingExpiry, setSavingExpiry] = useState(false);
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`).then((r) => r.json()).then((data) => {
       setHasPassword(data.hasPassword || false);
       setExpiresAt(data.expiresAt || null);
+      if (!data.expiresAt) {
+        setSelectedExpiry("permanent");
+      } else {
+        const remainH = (new Date(data.expiresAt).getTime() - Date.now()) / 3600000;
+        const sorted = EXPIRY_OPTIONS.filter((o) => o.value !== "permanent").map((o) => ({ ...o, h: Number(o.value) }));
+        const closest = sorted.reduce<typeof sorted[0] | null>((best, o) => {
+          if (!best) return o;
+          return Math.abs(o.h - remainH) < Math.abs(best.h - remainH) ? o : best;
+        }, null);
+        setSelectedExpiry(closest?.value || null);
+      }
     });
   }, [roomCode]);
 
@@ -818,7 +913,10 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
       body: JSON.stringify({ expiryHours: hours, token: roomToken, userId: currentUser?.id }),
     });
     const data = await res.json();
-    setExpiresAt(data.expiresAt || null);
+    if (res.ok) {
+      setExpiresAt(data.expiresAt || null);
+      setSelectedExpiry(hours);
+    }
     setSavingExpiry(false);
   };
 
@@ -894,13 +992,17 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
               <div className="flex flex-wrap gap-1.5">
                 {EXPIRY_OPTIONS.map((opt) => {
                   const disabled = opt.value === "permanent" && !currentUser;
+                  const isSelected = selectedExpiry === opt.value;
                   return (
                     <button key={opt.value}
                       onClick={() => !disabled && handleSetExpiry(opt.value)}
                       disabled={disabled || savingExpiry}
-                      className={`text-xs px-3 py-1.5 rounded-lg transition-all border
-                        ${disabled ? "bg-white/5 border-white/10 text-gray-600 cursor-not-allowed"
-                          : "bg-white/10 border-white/10 text-gray-300 hover:bg-white/20"}`}
+                      className={`text-xs px-3 py-1.5 rounded-lg transition-all border font-medium
+                        ${disabled
+                          ? "bg-gray-200/20 dark:bg-white/5 border-gray-300/20 dark:border-white/5 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                          : isSelected
+                            ? "bg-blue-500/30 border-blue-400/50 text-blue-600 dark:text-blue-300 shadow-sm"
+                            : "bg-gray-900/80 dark:bg-white/15 border-gray-700 dark:border-white/20 text-white dark:text-gray-200 hover:bg-gray-900 dark:hover:bg-white/25"}`}
                       title={disabled ? "Login required" : ""}>
                       {opt.label}
                       {disabled && <Lock className="w-2.5 h-2.5 inline ml-1 opacity-50" />}

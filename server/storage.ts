@@ -110,6 +110,7 @@ export const storage = {
       hasPassword: !!row.password_hash,
       expiresAt: row.expires_at,
       ownerId: row.owner_id,
+      createdAt: row.created_at,
     };
   },
 
