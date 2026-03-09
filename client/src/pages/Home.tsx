@@ -92,7 +92,7 @@ export default function Home() {
   const [copiedId, setCopiedId] = useState<string | null>(null);
   
   const [isDarkMode, setIsDarkMode] = useState(false);
-  // Settings & Modals State
+  const [isIncognito, setIsIncognito] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showPairing, setShowPairing] = useState(false);
   const [showQR, setShowQR] = useState<{show: boolean, content: string}>({show: false, content: ""});
@@ -440,7 +440,7 @@ export default function Home() {
 
           {/* Grid Content */}
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 pt-2">
-            <motion.layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+            <motion.div layout className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
               <AnimatePresence mode="popLayout">
                 {filteredClips.map((clip) => (
                   <ClipCard 
@@ -453,7 +453,7 @@ export default function Home() {
                   />
                 ))}
               </AnimatePresence>
-            </motion.layout>
+            </motion.div>
             
             {filteredClips.length === 0 && (
               <div className="h-[40vh] flex flex-col items-center justify-center text-center opacity-50">
