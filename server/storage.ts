@@ -2,6 +2,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import { type Clip } from "@shared/schema";
 import { randomUUID } from "crypto";
+import crypto from "crypto";
 
 const dbPath = path.resolve(process.cwd(), "clipboard.db");
 const db = new Database(dbPath);
@@ -12,43 +13,51 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS clips (
     id TEXT PRIMARY KEY,
     room_code TEXT NOT NULL,
-    content TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
     type TEXT NOT NULL DEFAULT 'text',
     timestamp TEXT NOT NULL,
     source_device TEXT NOT NULL DEFAULT 'Unknown',
     metadata TEXT,
     is_sensitive INTEGER NOT NULL DEFAULT 0,
-    burn_after_read INTEGER NOT NULL DEFAULT 0
+    burn_after_read INTEGER NOT NULL DEFAULT 0,
+    attachments TEXT
   )
 `);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_clips_room ON clips(room_code)`);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rooms (
+    room_code TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+`);
+
 const tableInfo = db.prepare("PRAGMA table_info(clips)").all() as Array<{ name: string }>;
 const columnNames = new Set(tableInfo.map((c) => c.name));
-if (!columnNames.has("metadata")) {
-  db.exec("ALTER TABLE clips ADD COLUMN metadata TEXT");
-}
-if (!columnNames.has("is_sensitive")) {
-  db.exec("ALTER TABLE clips ADD COLUMN is_sensitive INTEGER NOT NULL DEFAULT 0");
-}
-if (!columnNames.has("burn_after_read")) {
-  db.exec("ALTER TABLE clips ADD COLUMN burn_after_read INTEGER NOT NULL DEFAULT 0");
+if (!columnNames.has("metadata")) db.exec("ALTER TABLE clips ADD COLUMN metadata TEXT");
+if (!columnNames.has("is_sensitive")) db.exec("ALTER TABLE clips ADD COLUMN is_sensitive INTEGER NOT NULL DEFAULT 0");
+if (!columnNames.has("burn_after_read")) db.exec("ALTER TABLE clips ADD COLUMN burn_after_read INTEGER NOT NULL DEFAULT 0");
+if (!columnNames.has("attachments")) db.exec("ALTER TABLE clips ADD COLUMN attachments TEXT");
+
+function hashPassword(password: string): string {
+  return crypto.createHash("sha256").update(password).digest("hex");
 }
 
-const insertStmt = db.prepare(
-  `INSERT INTO clips (id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read)
-   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+const insertClipStmt = db.prepare(
+  `INSERT INTO clips (id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments)
+   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
 );
 const selectByRoomStmt = db.prepare(
   `SELECT * FROM clips WHERE room_code = ? ORDER BY timestamp DESC LIMIT 200`
 );
-const deleteByIdStmt = db.prepare(
-  `DELETE FROM clips WHERE id = ? AND room_code = ?`
-);
-const deleteByRoomStmt = db.prepare(
-  `DELETE FROM clips WHERE room_code = ?`
-);
+const deleteByIdStmt = db.prepare(`DELETE FROM clips WHERE id = ? AND room_code = ?`);
+const deleteByRoomStmt = db.prepare(`DELETE FROM clips WHERE room_code = ?`);
+const updateClipStmt = db.prepare(`UPDATE clips SET content = ?, type = ? WHERE id = ? AND room_code = ?`);
+
+const getRoomStmt = db.prepare(`SELECT * FROM rooms WHERE room_code = ?`);
+const insertRoomStmt = db.prepare(`INSERT INTO rooms (room_code, password_hash, created_at) VALUES (?, ?, ?)`);
 
 function rowToClip(row: any): Clip {
   return {
@@ -61,6 +70,7 @@ function rowToClip(row: any): Clip {
     metadata: row.metadata || undefined,
     isSensitive: row.is_sensitive === 1,
     burnAfterRead: row.burn_after_read === 1,
+    attachments: row.attachments ? JSON.parse(row.attachments) : undefined,
   };
 }
 
@@ -72,34 +82,60 @@ export const storage = {
     sourceDevice: string,
     metadata?: string,
     isSensitive?: boolean,
-    burnAfterRead?: boolean
+    burnAfterRead?: boolean,
+    attachments?: any[]
   ): Clip {
     const id = randomUUID();
     const timestamp = new Date().toISOString();
-    insertStmt.run(
+    const attachmentsJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
+    insertClipStmt.run(
       id, roomCode, content, type, timestamp, sourceDevice,
-      metadata || null, isSensitive ? 1 : 0, burnAfterRead ? 1 : 0
+      metadata || null, isSensitive ? 1 : 0, burnAfterRead ? 1 : 0,
+      attachmentsJson
     );
     return {
       id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
       metadata: metadata || undefined,
       isSensitive: isSensitive || false,
       burnAfterRead: burnAfterRead || false,
+      attachments: attachments || undefined,
     };
   },
 
-  getClipsByRoom(roomCode: string): Clip[] {
-    const rows = selectByRoomStmt.all(roomCode);
-    return rows.map(rowToClip);
-  },
-
-  deleteClip(id: string, roomCode: string): boolean {
-    const result = deleteByIdStmt.run(id, roomCode);
+  updateClip(id: string, roomCode: string, content: string, type: string): boolean {
+    const result = updateClipStmt.run(content, type, id, roomCode);
     return result.changes > 0;
   },
 
+  getClipsByRoom(roomCode: string): Clip[] {
+    return selectByRoomStmt.all(roomCode).map(rowToClip);
+  },
+
+  deleteClip(id: string, roomCode: string): boolean {
+    return deleteByIdStmt.run(id, roomCode).changes > 0;
+  },
+
   clearRoom(roomCode: string): number {
-    const result = deleteByRoomStmt.run(roomCode);
-    return result.changes;
+    return deleteByRoomStmt.run(roomCode).changes;
+  },
+
+  getRoom(roomCode: string): { roomCode: string; passwordHash: string } | null {
+    const row = getRoomStmt.get(roomCode) as any;
+    if (!row) return null;
+    return { roomCode: row.room_code, passwordHash: row.password_hash };
+  },
+
+  createRoom(roomCode: string, password: string): void {
+    insertRoomStmt.run(roomCode, hashPassword(password), new Date().toISOString());
+  },
+
+  verifyRoomPassword(roomCode: string, password: string): boolean {
+    const room = this.getRoom(roomCode);
+    if (!room) return false;
+    return room.passwordHash === hashPassword(password);
+  },
+
+  roomExists(roomCode: string): boolean {
+    return this.getRoom(roomCode) !== null;
   },
 };

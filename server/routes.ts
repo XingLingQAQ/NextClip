@@ -14,11 +14,36 @@ export async function registerRoutes(
     maxHttpBufferSize: 10 * 1024 * 1024,
   });
 
+  app.get("/api/rooms/:roomCode", (req, res) => {
+    const { roomCode } = req.params;
+    const exists = storage.roomExists(roomCode);
+    res.json({ exists, roomCode });
+  });
+
+  app.post("/api/rooms/:roomCode/join", (req, res) => {
+    const { roomCode } = req.params;
+    const { password } = req.body;
+
+    if (!password || password.length !== 6) {
+      return res.status(400).json({ message: "Password must be 6 digits" });
+    }
+
+    const exists = storage.roomExists(roomCode);
+    if (!exists) {
+      storage.createRoom(roomCode, password);
+      return res.json({ success: true, created: true });
+    }
+
+    const valid = storage.verifyRoomPassword(roomCode, password);
+    if (!valid) {
+      return res.status(403).json({ message: "Incorrect password" });
+    }
+
+    res.json({ success: true, created: false });
+  });
+
   app.get("/api/rooms/:roomCode/clips", (req, res) => {
     const { roomCode } = req.params;
-    if (!roomCode || roomCode.length < 1) {
-      return res.status(400).json({ message: "Room code is required" });
-    }
     const clips = storage.getClipsByRoom(roomCode);
     res.json(clips);
   });
@@ -26,9 +51,7 @@ export async function registerRoutes(
   app.delete("/api/rooms/:roomCode/clips/:clipId", (req, res) => {
     const { roomCode, clipId } = req.params;
     const deleted = storage.deleteClip(clipId, roomCode);
-    if (!deleted) {
-      return res.status(404).json({ message: "Clip not found" });
-    }
+    if (!deleted) return res.status(404).json({ message: "Clip not found" });
     res.json({ success: true });
   });
 
@@ -42,15 +65,12 @@ export async function registerRoutes(
     let currentRoom: string | null = null;
 
     socket.on("join-room", (roomCode: string) => {
-      if (currentRoom) {
-        socket.leave(currentRoom);
-      }
+      if (currentRoom) socket.leave(currentRoom);
       currentRoom = roomCode;
       socket.join(roomCode);
 
       const clips = storage.getClipsByRoom(roomCode);
-      const msg: RoomMessage = { type: "clip:history", clips };
-      socket.emit("room-message", msg);
+      socket.emit("room-message", { type: "clip:history", clips } as RoomMessage);
 
       const count = io.sockets.adapter.rooms.get(roomCode)?.size || 0;
       io.to(roomCode).emit("room-users", count);
@@ -63,30 +83,39 @@ export async function registerRoutes(
       metadata?: string;
       isSensitive?: boolean;
       burnAfterRead?: boolean;
+      attachments?: any[];
     }) => {
       if (!currentRoom) return;
       const clip = storage.createClip(
         currentRoom, data.content, data.type, data.sourceDevice,
-        data.metadata, data.isSensitive, data.burnAfterRead
+        data.metadata, data.isSensitive, data.burnAfterRead, data.attachments
       );
-      const msg: RoomMessage = { type: "clip:new", clip };
-      io.to(currentRoom).emit("room-message", msg);
+      io.to(currentRoom).emit("room-message", { type: "clip:new", clip } as RoomMessage);
+    });
+
+    socket.on("update-clip", (data: { clipId: string; content: string; type: string }) => {
+      if (!currentRoom) return;
+      const updated = storage.updateClip(data.clipId, currentRoom, data.content, data.type);
+      if (updated) {
+        const clips = storage.getClipsByRoom(currentRoom);
+        const clip = clips.find(c => c.id === data.clipId);
+        if (clip) {
+          io.to(currentRoom).emit("room-message", { type: "clip:update", clip } as RoomMessage);
+        }
+      }
     });
 
     socket.on("delete-clip", (clipId: string) => {
       if (!currentRoom) return;
-      const deleted = storage.deleteClip(clipId, currentRoom);
-      if (deleted) {
-        const msg: RoomMessage = { type: "clip:delete", clipId };
-        io.to(currentRoom).emit("room-message", msg);
+      if (storage.deleteClip(clipId, currentRoom)) {
+        io.to(currentRoom).emit("room-message", { type: "clip:delete", clipId } as RoomMessage);
       }
     });
 
     socket.on("clear-room", () => {
       if (!currentRoom) return;
       storage.clearRoom(currentRoom);
-      const msg: RoomMessage = { type: "clip:clear" };
-      io.to(currentRoom).emit("room-message", msg);
+      io.to(currentRoom).emit("room-message", { type: "clip:clear" } as RoomMessage);
     });
 
     socket.on("disconnect", () => {

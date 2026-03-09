@@ -1,7 +1,7 @@
 # CloudClip - Web Clipboard (网络剪贴板)
 
 ## Overview
-Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism) design. Users join rooms by code to sync clipboard content across devices instantly.
+Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism) design. Users join password-protected rooms to sync clipboard content across devices instantly.
 
 ## Tech Stack
 - **Frontend**: React (Vite) + Tailwind CSS v4 + Framer Motion + Lucide Icons
@@ -11,44 +11,58 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 
 ## Architecture
 - `/` — Landing page with hero, features, and security sections
-- `/app` — Main clipboard app with room-based authentication
+- `/app` — Main clipboard app (room join → compose → clip grid)
 
 ### Backend
 - `server/index.ts` — Express + HTTP server setup
 - `server/routes.ts` — REST API routes + Socket.io event handlers
-- `server/storage.ts` — SQLite storage layer with migration support
-- `shared/schema.ts` — Shared TypeScript types (Clip, RoomMessage)
+- `server/storage.ts` — SQLite storage layer with migration support + room passwords
+- `shared/schema.ts` — Shared TypeScript types (Clip, Attachment, RoomMessage, RoomInfo)
 
 ### Frontend
 - `client/src/pages/Landing.tsx` — Marketing/landing page
-- `client/src/pages/Home.tsx` — Main app (room join, compose, clip grid)
+- `client/src/pages/Home.tsx` — Main app (room join, compose, clip grid, detail modal)
 - `client/src/App.tsx` — Router setup with wouter
 
 ## Core Features
-1. **Room-based sync**: Enter a room code, all devices in same room share clips via WebSocket
-2. **Real-time updates**: Socket.io broadcasts new clips, deletes, clears to all room members
-3. **Multi-format**: Auto-detects text, links, code snippets; supports image upload (base64)
-4. **File/Image upload**: Drag-drop or file picker for images, displays preview in cards
-5. **Search & Filter**: Filter by type (text/link/image/code), favorites, search by content
-6. **Favorites**: Star clips (stored in localStorage per device)
-7. **Sensitive masking**: Mark clips as sensitive, content hidden until revealed
-8. **Burn after read**: Clips auto-delete after being copied once
-9. **Lock screen**: PIN-based app lock (client-side visual lock)
-10. **Incognito mode**: Visual indicator for privacy-conscious usage
-11. **Dark/Light theme**: Full theme support with glassmorphism design
-12. **PWA**: manifest.json configured for installability
+1. **Room-based sync with password**: Enter room code + 6-char password to create or join a room
+2. **Real-time updates**: Socket.io broadcasts new clips, deletes, clears, updates to all room members
+3. **Mixed content clips**: A single clip can contain text + images + files together
+4. **File/Image upload**: Drag-drop or file picker; attachments preview in compose area before sending
+5. **Image preview**: Click image clips for full-screen preview with download button
+6. **File display**: Files show filename only in card; click to preview text files or download
+7. **Detail/Edit modal**: Click any text/code/link clip to open full-content view with edit capability
+8. **Content truncation**: Long content truncated with line-clamp in cards; full view in modal
+9. **Download support**: Images and files have download buttons (not just copy)
+10. **Search & Filter**: Filter by type (text/link/image/code/file/mixed), favorites, search
+11. **Favorites**: Star clips (stored in localStorage per device)
+12. **Sensitive masking**: Mark clips as sensitive, content hidden until revealed
+13. **Burn after read**: Clips auto-delete after being copied once
+14. **Lock screen**: PIN-based app lock
+15. **Incognito mode**: Visual indicator for privacy-conscious usage
+16. **Dark/Light theme**: Full theme support with glassmorphism design
 
 ## Database
 - SQLite file: `clipboard.db` (gitignored)
-- Single `clips` table with columns: id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read
+- Tables:
+  - `clips`: id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments (JSON)
+  - `rooms`: room_code, password_hash (SHA-256), created_at
 - Auto-migration on startup for schema changes
 
 ## Socket.io Events
 - `join-room` → server sends `clip:history`
-- `send-clip` → server broadcasts `clip:new`
+- `send-clip` → server broadcasts `clip:new` (supports attachments array)
+- `update-clip` → server broadcasts `clip:update`
 - `delete-clip` → server broadcasts `clip:delete`
 - `clear-room` → server broadcasts `clip:clear`
 - `room-users` → online device count updates
+
+## API Routes
+- `GET /api/rooms/:roomCode` — Check if room exists
+- `POST /api/rooms/:roomCode/join` — Create or join room with password
+- `GET /api/rooms/:roomCode/clips` — Get room clips
+- `DELETE /api/rooms/:roomCode/clips/:clipId` — Delete single clip
+- `DELETE /api/rooms/:roomCode/clips` — Clear all room clips
 
 ## Design System
 - Glassmorphism: `glass-panel`, `glass-card`, `glass-input`, `glass-button` utilities
