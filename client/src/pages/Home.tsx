@@ -7,10 +7,11 @@ import {
   Shield, Flame, CheckCircle2, Eye, EyeOff, Users,
   LogIn, Smartphone, Hash, LogOut, Download, Maximize2,
   Paperclip, File, User as UserIcon, Timer, Unlock,
-  ArrowRight, ArrowLeft, Sparkles
+  ArrowRight, Globe
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 import type { Clip, RoomMessage, Attachment, User } from "@shared/schema";
+import { useT, type Lang } from "../i18n";
 
 function detectType(text: string): Clip["type"] {
   if (/^https?:\/\//.test(text.trim())) return "link";
@@ -47,8 +48,8 @@ function downloadDataUrl(dataUrl: string, fileName: string) {
 function PinInput({ value, onChange, length = 6 }: { value: string; onChange: (v: string) => void; length?: number }) {
   const refs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const handleChange = (i: number, char: string) => {
-    if (char.length > 1) char = char[char.length - 1];
+  const handleChange = (i: number, raw: string) => {
+    const char = raw.replace(/\D/g, "").slice(-1);
     const arr = value.split("");
     while (arr.length < length) arr.push("");
     arr[i] = char;
@@ -65,7 +66,7 @@ function PinInput({ value, onChange, length = 6 }: { value: string; onChange: (v
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault();
-    const pasted = e.clipboardData.getData("text").slice(0, length);
+    const pasted = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, length);
     onChange(pasted);
     const nextIdx = Math.min(pasted.length, length - 1);
     refs.current[nextIdx]?.focus();
@@ -75,7 +76,7 @@ function PinInput({ value, onChange, length = 6 }: { value: string; onChange: (v
     <div className="flex gap-2 justify-center">
       {Array.from({ length }).map((_, i) => (
         <input key={i} ref={(el) => { refs.current[i] = el; }}
-          type="password" maxLength={1}
+          type="tel" inputMode="numeric" pattern="[0-9]*" maxLength={1}
           value={value[i] || ""}
           onChange={(e) => handleChange(i, e.target.value)}
           onKeyDown={(e) => handleKeyDown(i, e)}
@@ -87,48 +88,28 @@ function PinInput({ value, onChange, length = 6 }: { value: string; onChange: (v
   );
 }
 
-const EXPIRY_OPTIONS = [
-  { label: "1 Hour", value: "1" },
-  { label: "24 Hours", value: "24" },
-  { label: "7 Days", value: "168" },
-  { label: "30 Days", value: "720" },
-  { label: "Permanent", value: "permanent" },
-];
+function LangToggle({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
+  return (
+    <button onClick={() => setLang(lang === "zh" ? "en" : "zh")}
+      className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors"
+      data-testid="button-lang-toggle">
+      <Globe className="w-3.5 h-3.5" />
+      <span>{lang === "zh" ? "EN" : "中文"}</span>
+    </button>
+  );
+}
 
-const ONBOARDING_STEPS = [
-  {
-    icon: Scissors,
-    title: "Welcome to CloudClip",
-    desc: "Your cross-platform cloud clipboard. Copy and sync text, images, and files across all your devices in real time.",
-    color: "from-blue-500 to-cyan-400",
-  },
-  {
-    icon: Hash,
-    title: "Room-Based Sync",
-    desc: "Enter any room code to create or join a room. Share the code with your other devices or teammates to sync clips instantly.",
-    color: "from-green-500 to-emerald-400",
-  },
-  {
-    icon: Shield,
-    title: "Privacy & Security",
-    desc: "Set a room password, mark clips as sensitive, enable burn-after-read, or go incognito. Your data stays private.",
-    color: "from-purple-500 to-indigo-400",
-  },
-  {
-    icon: Paperclip,
-    title: "Mixed Content",
-    desc: "Paste text, drag & drop images, or upload files. CloudClip handles all content types with full preview and download support.",
-    color: "from-orange-500 to-amber-400",
-  },
-  {
-    icon: UserIcon,
-    title: "Create an Account",
-    desc: "Sign up to unlock permanent rooms and more features. You can also use CloudClip without an account — just join a room!",
-    color: "from-pink-500 to-rose-400",
-  },
+const EXPIRY_OPTIONS_KEYS: Array<{ labelKey: "hour1" | "hours24" | "days7" | "days30" | "permanent"; value: string }> = [
+  { labelKey: "hour1", value: "1" },
+  { labelKey: "hours24", value: "24" },
+  { labelKey: "days7", value: "168" },
+  { labelKey: "days30", value: "720" },
+  { labelKey: "permanent", value: "permanent" },
 ];
 
 export default function Home() {
+  const { t, lang, setLang } = useT();
+
   const [isLocked, setIsLocked] = useState(false);
   const [lockPin, setLockPin] = useState("");
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem("cloudclip-onboarded"));
@@ -210,7 +191,7 @@ export default function Home() {
       const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ userId: currentUser?.id }),
       });
 
       const data = await res.json();
@@ -225,7 +206,7 @@ export default function Home() {
       }
 
       if (!res.ok) {
-        setJoinError(data.message || "Failed to join room");
+        setJoinError(data.message || t("failedJoinRoom"));
         setJoining(false);
         return;
       }
@@ -236,7 +217,7 @@ export default function Home() {
       localStorage.setItem("cloudclip-room-token", data.token);
       connectSocket(code, data.token);
     } catch {
-      setJoinError("Network error");
+      setJoinError(t("networkError"));
     }
     setJoining(false);
   };
@@ -253,7 +234,7 @@ export default function Home() {
       });
       if (!res.ok) {
         const data = await res.json();
-        setPasswordError(data.message || "Incorrect password");
+        setPasswordError(data.message || t("incorrectPassword"));
         setPasswordInput("");
         setJoining(false);
         return;
@@ -267,7 +248,7 @@ export default function Home() {
       setPendingRoomCode("");
       connectSocket(pendingRoomCode, data.token);
     } catch {
-      setPasswordError("Network error");
+      setPasswordError(t("networkError"));
     }
     setJoining(false);
   };
@@ -315,7 +296,7 @@ export default function Home() {
 
   const handleReadClipboard = async () => {
     try { const text = await navigator.clipboard.readText(); if (text) setComposeText(text); }
-    catch { alert("Clipboard access denied."); }
+    catch { alert(t("clipboardDenied")); }
   };
 
   const handleCopy = async (id: string, content: string, burn: boolean = false) => {
@@ -324,7 +305,7 @@ export default function Home() {
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
       if (burn) setTimeout(() => socketRef.current?.emit("delete-clip", id), 500);
-    } catch { alert("Failed to copy."); }
+    } catch { alert(t("failedCopy")); }
   };
 
   const handleSend = () => {
@@ -407,56 +388,6 @@ export default function Home() {
     return matchesSearch && matchesFilter;
   });
 
-  // ==================== ONBOARDING ====================
-  if (showOnboarding) {
-    const step = ONBOARDING_STEPS[onboardingStep];
-    const StepIcon = step.icon;
-    const isLast = onboardingStep === ONBOARDING_STEPS.length - 1;
-    return (
-      <div className="min-h-screen min-h-[100dvh] p-4 flex items-center justify-center font-sans relative overflow-hidden">
-        <motion.div key={onboardingStep} initial={{ opacity: 0, x: 60 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -60 }}
-          transition={{ duration: 0.4, ease: "easeOut" }}
-          className="glass-panel p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/20">
-          <div className={`w-20 h-20 rounded-2xl bg-gradient-to-tr ${step.color} flex items-center justify-center mb-6 shadow-lg`}>
-            <StepIcon className="w-10 h-10 text-white" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3 text-center" data-testid="text-onboarding-title">{step.title}</h2>
-          <p className="text-gray-500 dark:text-gray-300 text-sm mb-8 text-center leading-relaxed">{step.desc}</p>
-
-          <div className="flex items-center gap-1.5 mb-6">
-            {ONBOARDING_STEPS.map((_, i) => (
-              <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${i === onboardingStep ? "w-6 bg-blue-500" : "w-1.5 bg-gray-300 dark:bg-white/20"}`} />
-            ))}
-          </div>
-
-          <div className="flex gap-3 w-full">
-            {onboardingStep > 0 && (
-              <button onClick={() => setOnboardingStep((s) => s - 1)}
-                className="flex-1 py-3 rounded-xl border border-gray-200 dark:border-white/20 text-gray-700 dark:text-gray-300 font-medium hover:bg-black/5 dark:hover:bg-white/10 transition-colors flex items-center justify-center gap-2"
-                data-testid="button-onboarding-back">
-                <ArrowLeft className="w-4 h-4" /> Back
-              </button>
-            )}
-            <button onClick={() => {
-              if (isLast) { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); }
-              else setOnboardingStep((s) => s + 1);
-            }}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 text-white font-semibold shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-2"
-              data-testid="button-onboarding-next">
-              {isLast ? "Get Started" : "Next"} {isLast ? <Sparkles className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
-            </button>
-          </div>
-
-          <button onClick={() => { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); }}
-            className="mt-4 text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-            data-testid="button-onboarding-skip">
-            Skip
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
-
   // ==================== LOCK SCREEN ====================
   if (isLocked) {
     return (
@@ -467,15 +398,15 @@ export default function Home() {
           <div className="w-16 h-16 rounded-full bg-white/10 flex items-center justify-center mb-6 shadow-inner">
             <Lock className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2">App Locked</h2>
-          <p className="text-gray-300 text-sm mb-8 text-center">Enter your PIN to unlock</p>
+          <h2 className="text-2xl font-bold text-white mb-2">{t("appLocked")}</h2>
+          <p className="text-gray-300 text-sm mb-8 text-center">{t("enterPin")}</p>
           <input type="password" value={lockPin} onChange={(e) => setLockPin(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") setIsLocked(false); }}
             className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl px-4 py-3 text-center text-gray-900 dark:text-white tracking-[0.5em] text-xl outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors mb-6"
             placeholder="••••" data-testid="input-lock-pin" />
           <button onClick={() => setIsLocked(false)}
             className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors"
-            data-testid="button-unlock">Unlock</button>
+            data-testid="button-unlock">{t("unlock")}</button>
         </motion.div>
       </div>
     );
@@ -490,11 +421,11 @@ export default function Home() {
           <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-yellow-500 to-orange-400 flex items-center justify-center mb-6 shadow-lg">
             <Lock className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2" data-testid="text-password-title">Room Password</h2>
+          <h2 className="text-2xl font-bold text-white mb-2" data-testid="text-password-title">{t("roomPassword")}</h2>
           <p className="text-gray-300 text-sm mb-2 text-center">
-            Room <span className="font-mono font-bold text-white">{pendingRoomCode}</span> is password protected
+            <span className="font-mono font-bold text-white">{pendingRoomCode}</span> {t("roomProtected")}
           </p>
-          <p className="text-gray-400 text-xs mb-6 text-center">Enter the 6-character password to join</p>
+          <p className="text-gray-400 text-xs mb-6 text-center">{t("enter6Digit")}</p>
 
           <div className="mb-4">
             <PinInput value={passwordInput} onChange={(v) => {
@@ -510,74 +441,92 @@ export default function Home() {
             className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 mb-3"
             data-testid="button-submit-password">
             {joining ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Unlock className="w-5 h-5" />}
-            {joining ? "Verifying..." : "Unlock Room"}
+            {joining ? t("verifying") : t("unlockRoom")}
           </button>
 
           <button onClick={() => { setNeedPassword(false); setPendingRoomCode(""); setPasswordInput(""); }}
             className="text-sm text-gray-400 hover:text-white transition-colors">
-            Back
+            {t("back")}
           </button>
+          <div className="mt-4"><LangToggle lang={lang} setLang={setLang} /></div>
         </motion.div>
       </div>
     );
   }
 
-  // ==================== ROOM JOIN SCREEN ====================
+  // ==================== ROOM JOIN SCREEN (with interactive onboarding) ====================
   if (!roomCode) {
+    const finishOnboarding = () => { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); };
     return (
       <div className="min-h-screen min-h-[100dvh] p-4 flex items-center justify-center font-sans relative overflow-hidden">
         <motion.div initial={{ opacity: 0, scale: 0.9 }} animate={{ opacity: 1, scale: 1 }}
-          className="glass-panel p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/20">
+          className="glass-panel p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/20 relative">
           <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500 to-cyan-400 flex items-center justify-center mb-6 shadow-lg">
             <Scissors className="w-8 h-8 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-white mb-2" data-testid="text-app-title">CloudClip</h2>
-          <p className="text-gray-300 text-sm mb-6 text-center">
-            Enter a room code to join or create a room
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2" data-testid="text-app-title">CloudClip</h2>
+          <p className="text-gray-500 dark:text-gray-300 text-sm mb-6 text-center">
+            {t("enterRoomCode")}
           </p>
 
           <div className="w-full space-y-3">
-            <div className="relative">
+            <div className="relative" data-testid="onboard-target-input">
               <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
               <input type="text" value={roomInput} onChange={(e) => setRoomInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleJoinRoom(); }}
                 className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white text-lg outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
-                placeholder="Room Code" data-testid="input-room-code" />
+                placeholder={t("roomCode")} data-testid="input-room-code" />
+
+              {showOnboarding && onboardingStep === 0 && (
+                <OnboardingTooltip position="bottom" step={1} total={2}
+                  title={t("onboard1Title")} desc={t("onboard1Desc")}
+                  onNext={() => setOnboardingStep(1)} onSkip={finishOnboarding} t={t} />
+              )}
             </div>
 
             {joinError && <p className="text-red-400 text-xs text-center">{joinError}</p>}
 
-            <button onClick={handleJoinRoom}
-              disabled={!roomInput.trim() || joining}
-              className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
-              data-testid="button-join-room">
-              {joining ? <RefreshCw className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
-              {joining ? "Joining..." : "Join Room"}
-            </button>
+            <div className="relative" data-testid="onboard-target-join">
+              <button onClick={handleJoinRoom}
+                disabled={!roomInput.trim() || joining}
+                className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                data-testid="button-join-room">
+                {joining ? <RefreshCw className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
+                {joining ? t("joining") : t("joinRoom")}
+              </button>
+
+              {showOnboarding && onboardingStep === 1 && (
+                <OnboardingTooltip position="bottom" step={2} total={2}
+                  title={t("onboard2Title")} desc={t("onboard2Desc")}
+                  onNext={finishOnboarding} onSkip={finishOnboarding} isLast t={t} />
+              )}
+            </div>
           </div>
 
           <div className="mt-6 pt-4 border-t border-white/10 w-full text-center">
             {currentUser ? (
-              <div className="flex items-center justify-center gap-2 text-sm text-gray-300">
+              <div className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-300">
                 <UserIcon className="w-4 h-4 text-blue-400" />
-                <span className="font-medium text-white">{currentUser.username}</span>
+                <span className="font-medium text-gray-900 dark:text-white">{currentUser.username}</span>
                 <button onClick={() => { setCurrentUser(null); localStorage.removeItem("cloudclip-user"); }}
-                  className="text-xs text-gray-500 hover:text-red-400 ml-1 transition-colors">Log out</button>
+                  className="text-xs text-gray-500 hover:text-red-400 ml-1 transition-colors">{t("logOut")}</button>
               </div>
             ) : (
               <div className="flex items-center justify-center gap-3 text-sm">
-                <a href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-login">Log in</a>
+                <a href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-login">{t("logIn")}</a>
                 <span className="text-gray-600">|</span>
-                <a href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-register">Sign up</a>
+                <a href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-register">{t("signUp")}</a>
               </div>
             )}
           </div>
+          <div className="mt-3"><LangToggle lang={lang} setLang={setLang} /></div>
         </motion.div>
       </div>
     );
   }
 
   // ==================== MAIN APP ====================
+  const mainOnboardFinish = () => { localStorage.setItem("cloudclip-onboarded", "1"); setShowOnboarding(false); };
   return (
     <div className="min-h-screen p-0 md:p-4 lg:p-12 flex items-center justify-center font-sans text-gray-900 dark:text-white transition-colors duration-500 overflow-hidden">
       <AnimatePresence>
@@ -602,7 +551,7 @@ export default function Home() {
                 <h1 className="font-bold text-lg tracking-tight leading-tight">CloudClip</h1>
                 <div className="flex items-center gap-1.5 text-[10px]">
                   <span className={`w-1.5 h-1.5 rounded-full ${isConnected ? "bg-green-500" : "bg-red-500"}`} />
-                  <span className="opacity-60">Room: {roomCode}</span>
+                  <span className="opacity-60">{t("room")}: {roomCode}</span>
                   {onlineCount > 0 && <span className="opacity-60 flex items-center gap-0.5"><Users className="w-2.5 h-2.5" /> {onlineCount}</span>}
                 </div>
               </div>
@@ -610,20 +559,19 @@ export default function Home() {
           </div>
 
           <nav className="flex-row overflow-x-auto md:flex-col space-y-0 md:space-y-1 flex-none md:flex-1 md:overflow-y-auto pb-1 md:pb-4 scrollbar-hide flex md:block gap-2 items-center -mx-4 px-4 md:mx-0 md:px-0">
-            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">Library</div>
-            <NavItem icon={<Clock />} label="Recent" active={activeFilter === "all"} onClick={() => setActiveFilter("all")} />
-            <NavItem icon={<Star />} label="Favorites" active={activeFilter === "starred"} onClick={() => setActiveFilter("starred")} />
+            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">{t("library")}</div>
+            <NavItem icon={<Clock />} label={t("recent")} active={activeFilter === "all"} onClick={() => setActiveFilter("all")} />
+            <NavItem icon={<Star />} label={t("favorites")} active={activeFilter === "starred"} onClick={() => setActiveFilter("starred")} />
             <div className="hidden md:block h-px w-full bg-white/20 my-4" />
-            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">Types</div>
-            <NavItem icon={<FileText />} label="Texts" active={activeFilter === "text"} onClick={() => setActiveFilter("text")} count={clips.filter((c) => c.type === "text").length} />
-            <NavItem icon={<Link2 />} label="Links" active={activeFilter === "link"} onClick={() => setActiveFilter("link")} count={clips.filter((c) => c.type === "link").length} />
-            <NavItem icon={<ImageIcon />} label="Images" active={activeFilter === "image"} onClick={() => setActiveFilter("image")} count={clips.filter((c) => c.type === "image").length} />
-            <NavItem icon={<File />} label="Files" active={activeFilter === "file"} onClick={() => setActiveFilter("file")} count={clips.filter((c) => c.type === "file").length} />
-            <NavItem icon={<Scissors />} label="Mixed" active={activeFilter === "mixed"} onClick={() => setActiveFilter("mixed")} count={clips.filter((c) => c.type === "mixed").length} />
+            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">{t("types")}</div>
+            <NavItem icon={<FileText />} label={t("texts")} active={activeFilter === "text"} onClick={() => setActiveFilter("text")} count={clips.filter((c) => c.type === "text").length} />
+            <NavItem icon={<Link2 />} label={t("links")} active={activeFilter === "link"} onClick={() => setActiveFilter("link")} count={clips.filter((c) => c.type === "link").length} />
+            <NavItem icon={<ImageIcon />} label={t("images")} active={activeFilter === "image"} onClick={() => setActiveFilter("image")} count={clips.filter((c) => c.type === "image").length} />
+            <NavItem icon={<File />} label={t("files")} active={activeFilter === "file"} onClick={() => setActiveFilter("file")} count={clips.filter((c) => c.type === "file").length} />
+            <NavItem icon={<Scissors />} label={t("mixed")} active={activeFilter === "mixed"} onClick={() => setActiveFilter("mixed")} count={clips.filter((c) => c.type === "mixed").length} />
           </nav>
 
           <div className="hidden md:block mt-4 pt-4 space-y-2 border-t border-white/20 md:mt-auto">
-            {/* User info in sidebar */}
             {currentUser && (
               <div className="flex items-center gap-2 px-3 py-2 text-xs text-gray-400">
                 <UserIcon className="w-3.5 h-3.5 text-blue-400" />
@@ -633,15 +581,22 @@ export default function Home() {
             <div className="flex gap-2">
               <button onClick={() => setIsIncognito(!isIncognito)}
                 className={`flex-1 flex items-center justify-center py-2.5 rounded-xl transition-all ${isIncognito ? "bg-purple-500/20 text-purple-600 dark:text-purple-400" : "bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300"}`}
-                title="Incognito Mode"><Ghost className="w-4 h-4" /></button>
+                title={t("incognitoMode")}><Ghost className="w-4 h-4" /></button>
               <button onClick={() => setIsDarkMode(!isDarkMode)}
                 className="flex-1 flex items-center justify-center py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300 transition-all"
-                title="Toggle Theme">{isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>
+                title={t("toggleTheme")}>{isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}</button>
             </div>
-            <button onClick={() => setShowSettings(true)}
-              className="flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-xl w-full text-sm font-medium bg-white/10 hover:bg-white/20 text-gray-700 dark:text-gray-200 transition-colors">
-              <Settings className="w-4 h-4" /><span className="hidden md:inline">Settings & Room</span>
-            </button>
+            <div className="relative" data-testid="onboard-target-settings">
+              <button onClick={() => setShowSettings(true)}
+                className="flex items-center justify-center md:justify-start gap-3 px-4 py-3 rounded-xl w-full text-sm font-medium bg-white/10 hover:bg-white/20 text-gray-700 dark:text-gray-200 transition-colors">
+                <Settings className="w-4 h-4" /><span className="hidden md:inline">{t("settingsRoom")}</span>
+              </button>
+              {showOnboarding && onboardingStep === 2 && (
+                <OnboardingTooltip position="top" step={3} total={3}
+                  title={t("onboard5Title")} desc={t("onboard5Desc")}
+                  onNext={mainOnboardFinish} onSkip={mainOnboardFinish} isLast t={t} />
+              )}
+            </div>
           </div>
         </div>
 
@@ -649,16 +604,17 @@ export default function Home() {
         <div className="flex-1 flex flex-col min-w-0 bg-white/5 dark:bg-black/5 pb-[80px] md:pb-0 h-full">
           <header className="p-4 sm:p-6 pb-2">
             <div onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}
-              className={`relative rounded-2xl glass-input overflow-hidden transition-all duration-300 ${isDragging ? "ring-2 ring-blue-500 bg-blue-500/10" : ""}`}>
+              className={`relative rounded-2xl glass-input overflow-hidden transition-all duration-300 ${isDragging ? "ring-2 ring-blue-500 bg-blue-500/10" : ""}`}
+              data-testid="onboard-target-compose">
               {isDragging && (
                 <div className="absolute inset-0 z-20 flex items-center justify-center bg-blue-500/20 backdrop-blur-sm text-blue-600 dark:text-blue-400 font-medium">
-                  Drop files or text here
+                  {t("dropHere")}
                 </div>
               )}
               <div className="p-3">
                 <textarea value={composeText} onChange={(e) => setComposeText(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend(); }}
-                  placeholder="Type or paste content... (Ctrl+Enter to send)"
+                  placeholder={t("composeHint")}
                   className="w-full bg-transparent resize-none outline-none min-h-[50px] text-sm sm:text-base placeholder-gray-500"
                   data-testid="input-compose" />
 
@@ -686,38 +642,52 @@ export default function Home() {
               <div className="flex flex-wrap items-center justify-between gap-2 p-2 px-3 bg-black/5 dark:bg-white/5 border-t border-white/10">
                 <div className="flex items-center gap-1">
                   <button onClick={() => fileInputRef.current?.click()}
-                    className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors" title="Upload File / Image" data-testid="button-upload-file">
+                    className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors" title={t("uploadFile")} data-testid="button-upload-file">
                     <Plus className="w-4 h-4" />
                     <input type="file" ref={fileInputRef} className="hidden" multiple onChange={(e) => { handleFileSelect(e.target.files); e.target.value = ""; }} />
                   </button>
-                  <button onClick={handleReadClipboard} className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors" title="Read Clipboard" data-testid="button-read-clipboard">
+                  <button onClick={handleReadClipboard} className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors" title={t("readClipboard")} data-testid="button-read-clipboard">
                     <ClipboardPaste className="w-4 h-4" />
                   </button>
                   <button onClick={() => setComposeSettings((s) => ({ ...s, sensitive: !s.sensitive }))}
                     className={`p-2 rounded-lg transition-colors ${composeSettings.sensitive ? "bg-yellow-500/20 text-yellow-600 dark:text-yellow-400" : "hover:bg-white/20 text-gray-500 dark:text-gray-400"}`}
-                    title="Sensitive" data-testid="button-sensitive"><Shield className="w-4 h-4" /></button>
+                    title={t("sensitive")} data-testid="button-sensitive"><Shield className="w-4 h-4" /></button>
                   <button onClick={() => setComposeSettings((s) => ({ ...s, burn: !s.burn }))}
                     className={`p-2 rounded-lg transition-colors ${composeSettings.burn ? "bg-red-500/20 text-red-600 dark:text-red-400" : "hover:bg-white/20 text-gray-500 dark:text-gray-400"}`}
-                    title="Burn After Read" data-testid="button-burn"><Flame className="w-4 h-4" /></button>
+                    title={t("burnAfterRead")} data-testid="button-burn"><Flame className="w-4 h-4" /></button>
                 </div>
                 <div className="flex items-center gap-2">
-                  {!isConnected && <span className="text-xs text-red-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> Reconnecting...</span>}
-                  <button onClick={handleSend}
-                    disabled={(!composeText.trim() && composeAttachments.length === 0) || !isConnected}
-                    className="bg-blue-600 text-white dark:bg-blue-500 p-1.5 px-4 rounded-lg text-sm font-medium shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50"
-                    data-testid="button-send"><Send className="w-4 h-4" /><span className="hidden sm:inline">Send</span></button>
+                  {!isConnected && <span className="text-xs text-red-400 flex items-center gap-1"><RefreshCw className="w-3 h-3 animate-spin" /> {t("reconnecting")}</span>}
+                  <div className="relative" data-testid="onboard-target-send">
+                    <button onClick={handleSend}
+                      disabled={(!composeText.trim() && composeAttachments.length === 0) || !isConnected}
+                      className="bg-blue-600 text-white dark:bg-blue-500 p-1.5 px-4 rounded-lg text-sm font-medium shadow-lg hover:bg-blue-700 active:scale-95 transition-all flex items-center gap-2 disabled:opacity-50"
+                      data-testid="button-send"><Send className="w-4 h-4" /><span className="hidden sm:inline">{t("send")}</span></button>
+                    {showOnboarding && onboardingStep === 1 && (
+                      <OnboardingTooltip position="bottom" step={2} total={3}
+                        title={t("onboard4Title")} desc={t("onboard4Desc")}
+                        onNext={() => setOnboardingStep(2)} onSkip={mainOnboardFinish} t={t} />
+                    )}
+                  </div>
                 </div>
               </div>
+
+              {showOnboarding && onboardingStep === 0 && (
+                <OnboardingTooltip position="bottom" step={1} total={3}
+                  title={t("onboard3Title")} desc={t("onboard3Desc")}
+                  onNext={() => setOnboardingStep(1)} onSkip={mainOnboardFinish} t={t}
+                  className="absolute left-4 right-4 bottom-[-140px] z-30" />
+              )}
             </div>
           </header>
 
           <div className="px-4 sm:px-6 py-2 flex items-center gap-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <input type="text" placeholder="Search history..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
+              <input type="text" placeholder={t("searchHistory")} value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)}
                 className="w-full pl-9 pr-4 py-2 rounded-xl glass-input text-sm text-gray-800 dark:text-white placeholder-gray-500 outline-none" data-testid="input-search" />
             </div>
-            <button onClick={handleClearAll} className="text-xs font-medium text-red-500 hover:bg-red-500/10 px-3 py-2 rounded-lg transition-colors" data-testid="button-clear-all">Clear All</button>
+            <button onClick={handleClearAll} className="text-xs font-medium text-red-500 hover:bg-red-500/10 px-3 py-2 rounded-lg transition-colors" data-testid="button-clear-all">{t("clearAll")}</button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 sm:p-6 pt-2">
@@ -730,15 +700,15 @@ export default function Home() {
                     onToggleStar={() => handleToggleStar(clip.id)}
                     onOpenDetail={() => { setDetailClip(clip); setDetailEditContent(clip.content); }}
                     onPreviewAttachment={(att) => setPreviewAttachment(att)}
-                    isCopied={copiedId === clip.id} />
+                    isCopied={copiedId === clip.id} t={t} />
                 ))}
               </AnimatePresence>
             </motion.div>
             {filteredClips.length === 0 && (
               <div className="h-[40vh] flex flex-col items-center justify-center text-center opacity-50">
                 <Search className="w-12 h-12 mb-4" />
-                <p className="text-lg font-medium">{clips.length === 0 ? "No clips yet" : "No clips found"}</p>
-                <p className="text-sm">{clips.length === 0 ? "Send something to get started" : "Try a different search term"}</p>
+                <p className="text-lg font-medium">{clips.length === 0 ? t("noClips") : t("noClipsFound")}</p>
+                <p className="text-sm">{clips.length === 0 ? t("sendToStart") : t("tryDifferent")}</p>
               </div>
             )}
           </div>
@@ -753,7 +723,6 @@ export default function Home() {
         <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-3 rounded-xl text-gray-600 dark:text-gray-300">
           {isDarkMode ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}</button>
         <button onClick={() => setShowSettings(true)} className="p-3 rounded-xl text-gray-600 dark:text-gray-300"><Settings className="w-5 h-5" /></button>
-        <button onClick={() => setIsLocked(true)} className="p-3 rounded-xl text-gray-600 dark:text-gray-300"><Lock className="w-5 h-5" /></button>
       </div>
 
       {/* Detail / Edit Modal */}
@@ -766,9 +735,9 @@ export default function Home() {
               transition={{ type: "spring", damping: 25, stiffness: 200 }}
               className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl border border-white/20 w-full max-w-2xl rounded-t-3xl md:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
               <div className="p-5 border-b border-white/10 flex justify-between items-center">
-                <h2 className="text-lg font-bold flex items-center gap-2"><Maximize2 className="w-5 h-5" /> Clip Detail</h2>
+                <h2 className="text-lg font-bold flex items-center gap-2"><Maximize2 className="w-5 h-5" /> {t("clipDetail")}</h2>
                 <div className="flex items-center gap-2">
-                  <button onClick={handleSaveEdit} className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 transition-colors">Save</button>
+                  <button onClick={handleSaveEdit} className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 transition-colors">{t("save")}</button>
                   <button onClick={() => setDetailClip(null)} className="p-2 rounded-full hover:bg-white/20 transition-colors"><X className="w-5 h-5" /></button>
                 </div>
               </div>
@@ -782,7 +751,7 @@ export default function Home() {
                   className={`w-full bg-black/5 dark:bg-black/30 rounded-xl p-4 text-sm outline-none resize-y ${detailClip.type === "code" ? "font-mono min-h-[300px]" : "min-h-[200px]"}`} />
                 {detailClip.attachments && detailClip.attachments.length > 0 && (
                   <div className="space-y-3">
-                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">Attachments</h3>
+                    <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">{t("attachments")}</h3>
                     <div className="grid grid-cols-2 gap-3">
                       {detailClip.attachments.map((att, i) => (
                         <div key={i} className="glass-card rounded-xl p-3 flex flex-col items-center gap-2">
@@ -798,7 +767,7 @@ export default function Home() {
                           <p className="text-[10px] opacity-60">{formatFileSize(att.size)}</p>
                           <button onClick={() => downloadDataUrl(att.data, att.name)}
                             className="w-full text-xs bg-blue-600/20 text-blue-600 dark:text-blue-400 py-1.5 rounded-lg font-medium hover:bg-blue-600/30 flex items-center justify-center gap-1">
-                            <Download className="w-3 h-3" /> Download
+                            <Download className="w-3 h-3" /> {t("download")}
                           </button>
                         </div>
                       ))}
@@ -828,7 +797,7 @@ export default function Home() {
                 <div className="flex items-center gap-2">
                   <button onClick={() => downloadDataUrl(previewAttachment.data, previewAttachment.name)}
                     className="text-sm bg-blue-600 text-white px-4 py-1.5 rounded-lg font-medium hover:bg-blue-700 flex items-center gap-1">
-                    <Download className="w-4 h-4" /> Download
+                    <Download className="w-4 h-4" /> {t("download")}
                   </button>
                   <button onClick={() => setPreviewAttachment(null)} className="p-2 rounded-full hover:bg-white/20"><X className="w-5 h-5" /></button>
                 </div>
@@ -858,6 +827,8 @@ export default function Home() {
             roomToken={roomTokenRef.current}
             onClose={() => setShowSettings(false)}
             onLeave={() => { handleLeaveRoom(); setShowSettings(false); }}
+            lang={lang}
+            setLang={setLang}
           />
         )}
       </AnimatePresence>
@@ -865,27 +836,62 @@ export default function Home() {
   );
 }
 
+// ==================== Onboarding Tooltip ====================
+function OnboardingTooltip({ position, step, total, title, desc, onNext, onSkip, isLast, className, t }: {
+  position: "top" | "bottom"; step: number; total: number;
+  title: string; desc: string;
+  onNext: () => void; onSkip: () => void; isLast?: boolean;
+  className?: string;
+  t: (key: any) => string;
+}) {
+  return (
+    <motion.div initial={{ opacity: 0, y: position === "bottom" ? -8 : 8 }}
+      animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.3 }}
+      className={className || `absolute ${position === "bottom" ? "top-full mt-3" : "bottom-full mb-3"} left-0 right-0 z-50`}>
+      <div className={`absolute ${position === "bottom" ? "-top-2 left-8" : "-bottom-2 left-8"} w-4 h-4 bg-blue-600 rotate-45 rounded-sm`} />
+      <div className="bg-blue-600 text-white rounded-2xl p-4 shadow-2xl relative">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-[10px] font-bold opacity-70">{step} {t("stepOf")} {total}</span>
+          <button onClick={onSkip} className="text-[10px] opacity-70 hover:opacity-100 transition-opacity">{t("skip")}</button>
+        </div>
+        <h4 className="font-bold text-sm mb-1">{title}</h4>
+        <p className="text-xs opacity-90 leading-relaxed mb-3">{desc}</p>
+        <button onClick={onNext}
+          className="w-full py-2 rounded-xl bg-white text-blue-600 font-semibold text-sm hover:bg-blue-50 transition-colors flex items-center justify-center gap-1">
+          {isLast ? t("gotIt") : t("next")} {!isLast && <ArrowRight className="w-3.5 h-3.5" />}
+        </button>
+      </div>
+    </motion.div>
+  );
+}
+
 // ==================== Settings Modal ====================
-function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, onClose, onLeave }: {
+function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, onClose, onLeave, lang, setLang: setLangFn }: {
   roomCode: string; onlineCount: number; clips: Clip[]; currentUser: User | null; roomToken: string;
   onClose: () => void; onLeave: () => void;
+  lang: Lang; setLang: (l: Lang) => void;
 }) {
+  const { t } = useT();
   const [roomPassword, setRoomPassword] = useState("");
   const [hasPassword, setHasPassword] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [savingExpiry, setSavingExpiry] = useState(false);
+  const [ownerId, setOwnerId] = useState<string | null>(null);
+
+  const isOwner = currentUser && ownerId && currentUser.id === ownerId;
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`).then((r) => r.json()).then((data) => {
       setHasPassword(data.hasPassword || false);
       setExpiresAt(data.expiresAt || null);
+      setOwnerId(data.ownerId || null);
       if (!data.expiresAt) {
         setSelectedExpiry("permanent");
       } else {
         const remainH = (new Date(data.expiresAt).getTime() - Date.now()) / 3600000;
-        const sorted = EXPIRY_OPTIONS.filter((o) => o.value !== "permanent").map((o) => ({ ...o, h: Number(o.value) }));
+        const sorted = EXPIRY_OPTIONS_KEYS.filter((o) => o.value !== "permanent").map((o) => ({ ...o, h: Number(o.value) }));
         const closest = sorted.reduce<typeof sorted[0] | null>((best, o) => {
           if (!best) return o;
           return Math.abs(o.h - remainH) < Math.abs(best.h - remainH) ? o : best;
@@ -899,7 +905,7 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
     setSavingPassword(true);
     await fetch(`/api/rooms/${encodeURIComponent(roomCode)}/password`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ password: pwd, token: roomToken }),
+      body: JSON.stringify({ password: pwd, token: roomToken, userId: currentUser?.id }),
     });
     setHasPassword(!!pwd);
     setRoomPassword("");
@@ -928,20 +934,23 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
         transition={{ type: "spring", damping: 25, stiffness: 200 }}
         className="bg-white/80 dark:bg-black/80 backdrop-blur-2xl border border-white/20 w-full max-w-2xl rounded-t-3xl md:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-white/10 flex justify-between items-center bg-white/5">
-          <h2 className="text-xl font-bold flex items-center gap-2"><Settings className="w-5 h-5" /> Settings</h2>
-          <button onClick={onClose} className="p-2 rounded-full hover:bg-white/20"><X className="w-5 h-5" /></button>
+          <h2 className="text-xl font-bold flex items-center gap-2"><Settings className="w-5 h-5" /> {t("settings")}</h2>
+          <div className="flex items-center gap-3">
+            <LangToggle lang={lang} setLang={setLangFn} />
+            <button onClick={onClose} className="p-2 rounded-full hover:bg-white/20"><X className="w-5 h-5" /></button>
+          </div>
         </div>
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
           <section>
-            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Connection</h3>
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{t("connection")}</h3>
             <div className="space-y-3">
               <div className="glass-card p-4 rounded-2xl flex items-center justify-between">
-                <div><div className="font-medium flex items-center gap-2"><Hash className="w-4 h-4 text-blue-500" /> Room Code</div>
-                  <div className="text-xs text-gray-500 mt-1">Share this with other devices</div></div>
+                <div><div className="font-medium flex items-center gap-2"><Hash className="w-4 h-4 text-blue-500" /> {t("roomCode")}</div>
+                  <div className="text-xs text-gray-500 mt-1">{t("shareDevices")}</div></div>
                 <span className="text-lg font-mono font-bold tracking-wider bg-white/20 dark:bg-white/10 px-4 py-1.5 rounded-xl">{roomCode}</span>
               </div>
               <div className="glass-card p-4 rounded-2xl flex items-center justify-between">
-                <div><div className="font-medium flex items-center gap-2"><Users className="w-4 h-4 text-green-500" /> Online</div></div>
+                <div><div className="font-medium flex items-center gap-2"><Users className="w-4 h-4 text-green-500" /> {t("online")}</div></div>
                 <span className="text-lg font-bold">{onlineCount}</span>
               </div>
             </div>
@@ -949,85 +958,92 @@ function SettingsModal({ roomCode, onlineCount, clips, currentUser, roomToken, o
 
           {/* Password Section */}
           <section>
-            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Room Password</h3>
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{t("roomPassword")}</h3>
             <div className="glass-card p-4 rounded-2xl space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-sm">
                   {hasPassword ? (
-                    <><Shield className="w-4 h-4 text-green-500" /><span className="font-medium">Password protected</span></>
+                    <><Shield className="w-4 h-4 text-green-500" /><span className="font-medium">{t("passwordProtected")}</span></>
                   ) : (
-                    <><Unlock className="w-4 h-4 text-gray-400" /><span className="font-medium text-gray-400">No password</span></>
+                    <><Unlock className="w-4 h-4 text-gray-400" /><span className="font-medium text-gray-400">{t("noPassword")}</span></>
                   )}
                 </div>
-                {hasPassword && (
+                {hasPassword && isOwner && (
                   <button onClick={() => handleSetPassword(null)} disabled={savingPassword}
-                    className="text-xs text-red-400 hover:text-red-300 transition-colors">Remove</button>
+                    className="text-xs text-red-400 hover:text-red-300 transition-colors">{t("remove")}</button>
                 )}
               </div>
-              {!hasPassword && (
+              {!hasPassword && isOwner && (
                 <div className="space-y-2">
                   <PinInput value={roomPassword} onChange={setRoomPassword} />
                   <button onClick={() => { if (roomPassword.length === 6) handleSetPassword(roomPassword); }}
                     disabled={roomPassword.length !== 6 || savingPassword}
                     className="w-full text-sm py-2 rounded-lg bg-blue-600/20 text-blue-600 dark:text-blue-400 font-medium disabled:opacity-50 hover:bg-blue-600/30 transition-colors flex items-center justify-center gap-1">
                     {savingPassword ? <RefreshCw className="w-3 h-3 animate-spin" /> : <Lock className="w-3 h-3" />}
-                    Set Password
+                    {t("setPassword")}
                   </button>
                 </div>
+              )}
+              {!isOwner && (
+                <p className="text-xs text-gray-400 italic">{t("ownerOnly")}</p>
               )}
             </div>
           </section>
 
           {/* Expiry Section */}
           <section>
-            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Room Expiry</h3>
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{t("roomExpiry")}</h3>
             <div className="glass-card p-4 rounded-2xl space-y-3">
               <div className="text-sm text-gray-500">
                 {expiresAt ? (
-                  <span className="flex items-center gap-2"><Timer className="w-4 h-4 text-orange-400" /> Expires: {new Date(expiresAt).toLocaleString()}</span>
+                  <span className="flex items-center gap-2"><Timer className="w-4 h-4 text-orange-400" /> {t("expires")}: {new Date(expiresAt).toLocaleString()}</span>
                 ) : (
-                  <span className="flex items-center gap-2"><Timer className="w-4 h-4 text-green-400" /> Permanent room</span>
+                  <span className="flex items-center gap-2"><Timer className="w-4 h-4 text-green-400" /> {t("permanentRoom")}</span>
                 )}
               </div>
-              <div className="flex flex-wrap gap-1.5">
-                {EXPIRY_OPTIONS.map((opt) => {
-                  const disabled = opt.value === "permanent" && !currentUser;
-                  const isSelected = selectedExpiry === opt.value;
-                  return (
-                    <button key={opt.value}
-                      onClick={() => !disabled && handleSetExpiry(opt.value)}
-                      disabled={disabled || savingExpiry}
-                      className={`text-xs px-3 py-1.5 rounded-lg transition-all border font-medium
-                        ${disabled
-                          ? "bg-gray-200/20 dark:bg-white/5 border-gray-300/20 dark:border-white/5 text-gray-400 dark:text-gray-600 cursor-not-allowed"
-                          : isSelected
-                            ? "bg-blue-500/30 border-blue-400/50 text-blue-600 dark:text-blue-300 shadow-sm"
-                            : "bg-gray-900/80 dark:bg-white/15 border-gray-700 dark:border-white/20 text-white dark:text-gray-200 hover:bg-gray-900 dark:hover:bg-white/25"}`}
-                      title={disabled ? "Login required" : ""}>
-                      {opt.label}
-                      {disabled && <Lock className="w-2.5 h-2.5 inline ml-1 opacity-50" />}
-                    </button>
-                  );
-                })}
-              </div>
+              {isOwner ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {EXPIRY_OPTIONS_KEYS.map((opt) => {
+                    const disabled = opt.value === "permanent" && !currentUser;
+                    const isSelected = selectedExpiry === opt.value;
+                    return (
+                      <button key={opt.value}
+                        onClick={() => !disabled && handleSetExpiry(opt.value)}
+                        disabled={disabled || savingExpiry}
+                        className={`text-xs px-3 py-1.5 rounded-lg transition-all border font-medium
+                          ${disabled
+                            ? "bg-gray-200/20 dark:bg-white/5 border-gray-300/20 dark:border-white/5 text-gray-400 dark:text-gray-600 cursor-not-allowed"
+                            : isSelected
+                              ? "bg-blue-500/30 border-blue-400/50 text-blue-600 dark:text-blue-300 shadow-sm"
+                              : "bg-gray-900/80 dark:bg-white/15 border-gray-700 dark:border-white/20 text-white dark:text-gray-200 hover:bg-gray-900 dark:hover:bg-white/25"}`}
+                        title={disabled ? t("loginRequired") : ""}>
+                        {t(opt.labelKey)}
+                        {disabled && <Lock className="w-2.5 h-2.5 inline ml-1 opacity-50" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400 italic">{t("ownerOnly")}</p>
+              )}
             </div>
           </section>
 
           <section>
-            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">Stats</h3>
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">{t("stats")}</h3>
             <div className="glass-card p-4 rounded-2xl">
               <div className="grid grid-cols-4 gap-4 text-center">
-                <div><div className="text-2xl font-bold">{clips.length}</div><div className="text-xs text-gray-500">Total</div></div>
-                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "text" || c.type === "code" || c.type === "link").length}</div><div className="text-xs text-gray-500">Texts</div></div>
-                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "image").length}</div><div className="text-xs text-gray-500">Images</div></div>
-                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "file" || c.type === "mixed").length}</div><div className="text-xs text-gray-500">Files</div></div>
+                <div><div className="text-2xl font-bold">{clips.length}</div><div className="text-xs text-gray-500">{t("total")}</div></div>
+                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "text" || c.type === "code" || c.type === "link").length}</div><div className="text-xs text-gray-500">{t("texts")}</div></div>
+                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "image").length}</div><div className="text-xs text-gray-500">{t("images")}</div></div>
+                <div><div className="text-2xl font-bold">{clips.filter((c) => c.type === "file" || c.type === "mixed").length}</div><div className="text-xs text-gray-500">{t("files")}</div></div>
               </div>
             </div>
           </section>
 
           <button onClick={onLeave}
             className="w-full py-3 rounded-xl bg-red-500/10 text-red-500 font-semibold hover:bg-red-500/20 transition-colors flex items-center justify-center gap-2">
-            <LogOut className="w-4 h-4" /> Leave Room
+            <LogOut className="w-4 h-4" /> {t("leaveRoom")}
           </button>
         </div>
       </motion.div>
@@ -1052,11 +1068,12 @@ function NavItem({ icon, label, active, onClick, count }: { icon: React.ReactNod
   );
 }
 
-function ClipCard({ clip, isStarred, onCopy, onDelete, onToggleStar, onOpenDetail, onPreviewAttachment, isCopied }: {
+function ClipCard({ clip, isStarred, onCopy, onDelete, onToggleStar, onOpenDetail, onPreviewAttachment, isCopied, t }: {
   clip: Clip; isStarred: boolean; isCopied: boolean;
   onCopy: (burn?: boolean) => void; onDelete: () => void;
   onToggleStar: () => void; onOpenDetail: () => void;
   onPreviewAttachment: (att: Attachment) => void;
+  t: (key: any) => string;
 }) {
   const [showSensitive, setShowSensitive] = useState(!clip.isSensitive);
 
@@ -1106,7 +1123,7 @@ function ClipCard({ clip, isStarred, onCopy, onDelete, onToggleStar, onOpenDetai
           <div className="flex-1 flex flex-col items-center justify-center text-center">
             <p className="text-2xl tracking-[0.3em] font-mono opacity-50">••••••••</p>
             <button onClick={(e) => { e.stopPropagation(); setShowSensitive(true); }}
-              className="mt-2 text-xs flex items-center gap-1 text-blue-500 hover:underline"><Eye className="w-3 h-3" /> Tap to reveal</button>
+              className="mt-2 text-xs flex items-center gap-1 text-blue-500 hover:underline"><Eye className="w-3 h-3" /> {t("tapToReveal")}</button>
           </div>
         ) : isImageOnly && firstImageAtt ? (
           <div className="absolute inset-0 -mx-5 -my-4 pt-14 pb-12">

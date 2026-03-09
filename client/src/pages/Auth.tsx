@@ -2,13 +2,15 @@ import { useState } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import {
-  Scissors, Lock, LogIn, UserPlus, User as UserIcon,
-  RefreshCw, ArrowLeft
+  Lock, LogIn, UserPlus, User as UserIcon,
+  RefreshCw, ArrowLeft, Globe
 } from "lucide-react";
 import type { User } from "@shared/schema";
+import { useT } from "../i18n";
 
 export default function Auth({ mode }: { mode: "login" | "register" }) {
   const [, navigate] = useLocation();
+  const { t, lang, setLang } = useT();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -19,19 +21,19 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
 
   const handleSubmit = async () => {
     if (!username.trim() || !password) {
-      setError("Please fill all fields");
+      setError(t("fillAllFields"));
       return;
     }
     if (!isLogin && password !== confirmPassword) {
-      setError("Passwords don't match");
+      setError(t("passwordsNoMatch"));
       return;
     }
     if (!isLogin && password.length < 4) {
-      setError("Password must be at least 4 characters");
+      setError(t("passwordMinLen"));
       return;
     }
     if (username.trim().length < 2) {
-      setError("Username must be at least 2 characters");
+      setError(t("usernameMinLen"));
       return;
     }
 
@@ -54,7 +56,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
       localStorage.setItem("cloudclip-user", JSON.stringify(data.user));
       navigate("/app");
     } catch {
-      setError("Network error");
+      setError(t("networkError"));
     }
     setLoading(false);
   };
@@ -69,11 +71,11 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
           {isLogin ? <LogIn className="w-8 h-8 text-white" /> : <UserPlus className="w-8 h-8 text-white" />}
         </div>
 
-        <h2 className="text-2xl font-bold text-white mb-1" data-testid="text-auth-title">
-          {isLogin ? "Welcome Back" : "Create Account"}
+        <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1" data-testid="text-auth-title">
+          {isLogin ? t("welcomeBack") : t("createAccount")}
         </h2>
-        <p className="text-gray-400 text-sm mb-6 text-center">
-          {isLogin ? "Log in to your CloudClip account" : "Sign up to unlock premium features"}
+        <p className="text-gray-500 dark:text-gray-400 text-sm mb-6 text-center">
+          {isLogin ? t("loginDesc") : t("registerDesc")}
         </p>
 
         <div className="w-full space-y-3">
@@ -81,7 +83,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
             <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
             <input type="text" value={username} onChange={(e) => setUsername(e.target.value)}
               className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
-              placeholder="Username" data-testid="input-auth-username" />
+              placeholder={t("username")} data-testid="input-auth-username" />
           </div>
 
           <div className="relative">
@@ -89,7 +91,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && isLogin) handleSubmit(); }}
               className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
-              placeholder="Password" data-testid="input-auth-password" />
+              placeholder={t("password")} data-testid="input-auth-password" />
           </div>
 
           {!isLogin && (
@@ -98,7 +100,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
               <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
                 className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
-                placeholder="Confirm Password" data-testid="input-auth-confirm" />
+                placeholder={t("confirmPassword")} data-testid="input-auth-confirm" />
             </div>
           )}
 
@@ -108,7 +110,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
             className="w-full py-3 rounded-xl bg-blue-600 text-white font-semibold shadow-lg hover:bg-blue-700 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
             data-testid="button-auth-submit">
             {loading && <RefreshCw className="w-4 h-4 animate-spin" />}
-            {isLogin ? "Log In" : "Create Account"}
+            {isLogin ? t("logIn") : t("createAccount")}
           </button>
         </div>
 
@@ -116,17 +118,17 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
           <div className="h-px w-full bg-white/10" />
 
           {isLogin ? (
-            <p className="text-sm text-gray-400">
-              Don't have an account?{" "}
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {t("noAccount")}{" "}
               <button onClick={() => navigate("/register")} className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-register">
-                Sign up
+                {t("signUp")}
               </button>
             </p>
           ) : (
-            <p className="text-sm text-gray-400">
-              Already have an account?{" "}
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              {t("hasAccount")}{" "}
               <button onClick={() => navigate("/login")} className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-login">
-                Log in
+                {t("logIn")}
               </button>
             </p>
           )}
@@ -134,7 +136,14 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
           <button onClick={() => navigate("/app")}
             className="flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-300 transition-colors"
             data-testid="link-back-app">
-            <ArrowLeft className="w-4 h-4" /> Continue without account
+            <ArrowLeft className="w-4 h-4" /> {t("continueWithout")}
+          </button>
+
+          <button onClick={() => setLang(lang === "zh" ? "en" : "zh")}
+            className="flex items-center gap-1 text-xs text-gray-400 hover:text-gray-200 transition-colors mt-1"
+            data-testid="button-lang-toggle-auth">
+            <Globe className="w-3.5 h-3.5" />
+            <span>{lang === "zh" ? "EN" : "中文"}</span>
           </button>
         </div>
       </motion.div>

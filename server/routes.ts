@@ -49,22 +49,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   app.get("/api/rooms/:roomCode", (req, res) => {
     const room = storage.getRoom(req.params.roomCode);
     if (!room) return res.json({ exists: false });
-    res.json({ exists: true, hasPassword: room.hasPassword, expiresAt: room.expiresAt, createdAt: room.createdAt });
+    res.json({
+      exists: true,
+      hasPassword: room.hasPassword,
+      expiresAt: room.expiresAt,
+      createdAt: room.createdAt,
+      ownerId: room.ownerId,
+    });
   });
 
   app.post("/api/rooms/:roomCode/join", (req, res) => {
     const { roomCode } = req.params;
-    const { password } = req.body;
+    const { password, userId } = req.body;
     const room = storage.getRoom(roomCode);
 
     if (!room) {
-      const { expiryHours, userId } = req.body;
       let expiresAt: string | null = null;
-      if (expiryHours && expiryHours !== "permanent" && VALID_EXPIRY.has(String(expiryHours))) {
-        expiresAt = new Date(Date.now() + parseInt(String(expiryHours)) * 3600000).toISOString();
-      } else if (!expiryHours || !VALID_EXPIRY.has(String(expiryHours))) {
-        expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
-      }
+      expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
       const verifiedUserId = userId ? (storage.getUserById(userId) ? userId : null) : null;
       storage.createRoom(roomCode, verifiedUserId || undefined, undefined, expiresAt);
       const token = issueRoomToken(roomCode);
@@ -84,12 +85,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/rooms/:roomCode/password", (req, res) => {
     const { roomCode } = req.params;
-    const { password, token } = req.body;
+    const { password, token, userId } = req.body;
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    if (password && (typeof password !== "string" || password.length !== 6)) {
-      return res.status(400).json({ message: "Password must be 6 characters" });
+    const room = storage.getRoom(roomCode);
+    if (!room) return res.status(404).json({ message: "Room not found" });
+    if (room.ownerId && room.ownerId !== userId) {
+      return res.status(403).json({ message: "Only the room owner can change the password" });
+    }
+    if (password) {
+      if (typeof password !== "string" || password.length !== 6 || !/^\d{6}$/.test(password)) {
+        return res.status(400).json({ message: "Password must be exactly 6 digits" });
+      }
     }
     storage.setRoomPassword(roomCode, password || null);
     res.json({ success: true });
@@ -100,6 +108,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const { expiryHours, token, userId } = req.body;
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
+    }
+    const room = storage.getRoom(roomCode);
+    if (!room) return res.status(404).json({ message: "Room not found" });
+    if (room.ownerId && room.ownerId !== userId) {
+      return res.status(403).json({ message: "Only the room owner can change the expiry" });
     }
     if (!VALID_EXPIRY.has(String(expiryHours))) {
       return res.status(400).json({ message: "Invalid expiry value" });

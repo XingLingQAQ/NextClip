@@ -12,16 +12,20 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 ## Architecture
 - `/` — Landing page with hero, features, and security sections
 - `/app` — Main clipboard app (room join → compose → clip grid)
+- `/login` — Login page
+- `/register` — Registration page
 
 ### Backend
 - `server/index.ts` — Express + HTTP server setup
 - `server/routes.ts` — REST API routes + Socket.io event handlers
 - `server/storage.ts` — SQLite storage layer with migration support + room passwords
-- `shared/schema.ts` — Shared TypeScript types (Clip, Attachment, RoomMessage, RoomInfo)
+- `shared/schema.ts` — Shared TypeScript types (Clip, Attachment, RoomMessage, RoomInfo, User)
 
 ### Frontend
-- `client/src/pages/Landing.tsx` — Marketing/landing page
-- `client/src/pages/Home.tsx` — Main app (room join, compose, clip grid, detail modal)
+- `client/src/pages/Landing.tsx` — Marketing/landing page (i18n supported)
+- `client/src/pages/Home.tsx` — Main app (room join, compose, clip grid, detail modal, settings)
+- `client/src/pages/Auth.tsx` — Login/register page (i18n supported)
+- `client/src/i18n.ts` — Internationalization system (Chinese/English)
 - `client/src/App.tsx` — Router setup with wouter
 
 ## Core Features
@@ -44,6 +48,18 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 17. **User accounts**: Login/register for unlocking permanent room creation
 18. **Room expiry**: Configurable auto-destroy (1h/24h/7d/30d/permanent). Only logged-in users can set permanent
 19. **Room tokens**: Server issues access tokens on successful join; socket.io validates tokens before sending data
+20. **Room owner enforcement**: Only room creator can change password/expiry settings. Server validates owner_id.
+21. **i18n (Chinese/English)**: Full bilingual support. Default language is Chinese. Globe toggle on every screen.
+22. **Interactive onboarding**: Step-by-step tooltips pointing at UI elements (room code input → join button on join screen; compose area → send button → settings button on main app). Skippable, persisted in localStorage.
+23. **PinInput numbers-only**: Room password input accepts only digits (6-digit numeric PIN).
+
+## i18n System
+- File: `client/src/i18n.ts`
+- Default language: Chinese (`zh`)
+- Stored in `cloudclip-lang` localStorage key
+- `useT()` hook returns `{ t, lang, setLang }`
+- `setLang()` triggers page reload
+- `LangToggle` component (Globe button) available on join screen, password screen, settings modal, auth pages, landing page
 
 ## Database
 - SQLite file: `clipboard.db` (gitignored)
@@ -52,6 +68,7 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
   - `clips`: id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments (JSON)
   - `rooms`: room_code, password_hash (SHA-256, nullable), owner_id, expires_at, created_at
 - Auto-migration on startup for schema changes
+- Expired rooms auto-cleaned on startup + every 60 seconds
 
 ## Socket.io Events
 - `join-room` → server sends `clip:history`
@@ -62,13 +79,18 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `room-users` → online device count updates
 
 ## API Routes
-- `GET /api/rooms/:roomCode` — Check if room exists
-- `POST /api/rooms/:roomCode/join` — Create or join room with password
+- `GET /api/rooms/:roomCode` — Check if room exists, returns ownerId, createdAt
+- `POST /api/rooms/:roomCode/join` — Create or join room (sends userId for ownership)
+- `POST /api/rooms/:roomCode/password` — Set/remove room password (owner-only when ownerId set)
+- `POST /api/rooms/:roomCode/expiry` — Set room expiry (owner-only when ownerId set)
 - `GET /api/rooms/:roomCode/clips` — Get room clips
 - `DELETE /api/rooms/:roomCode/clips/:clipId` — Delete single clip
 - `DELETE /api/rooms/:roomCode/clips` — Clear all room clips
+- `POST /api/auth/register` — Create user account
+- `POST /api/auth/login` — Login and get user info
 
 ## Design System
 - Glassmorphism: `glass-panel`, `glass-card`, `glass-input`, `glass-button` utilities
 - Background: fixed landscape photo at `/images/background.jpg`
 - Fonts: Plus Jakarta Sans + Inter
+- Input text colors: `text-gray-900 dark:text-white` with matching light/dark backgrounds
