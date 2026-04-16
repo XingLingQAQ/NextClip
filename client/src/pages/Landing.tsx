@@ -137,14 +137,14 @@ export default function Landing() {
             {t("heroDesc")}
           </p>
 
-          <div className="flex flex-col xs:flex-row items-center gap-3 w-full xs:w-auto">
+          <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
             <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
               onHoverStart={() => setIsHovered(true)}
               onHoverEnd={() => setIsHovered(false)}
               onClick={() => setLocation("/app")}
-              className="group relative w-full xs:w-auto px-7 py-3.5 sm:px-8 sm:py-4 bg-white text-black rounded-2xl font-bold text-base sm:text-lg shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:shadow-[0_0_60px_rgba(255,255,255,0.5)] transition-all flex items-center justify-center gap-3 overflow-hidden"
+              className="group relative w-full sm:w-auto max-w-xs mx-auto sm:max-w-none px-8 py-4 bg-white text-black rounded-2xl font-bold text-base sm:text-lg shadow-[0_0_40px_rgba(255,255,255,0.3)] hover:shadow-[0_0_60px_rgba(255,255,255,0.5)] transition-all flex items-center justify-center gap-3 overflow-hidden"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-blue-500/10 to-purple-500/10 opacity-0 group-hover:opacity-100 transition-opacity" />
               <span>{t("openClipboard")}</span>
@@ -152,9 +152,9 @@ export default function Landing() {
             </motion.button>
             <button
               onClick={() => setLocation("/login")}
-              className="text-sm font-medium text-white/70 hover:text-white underline underline-offset-4 transition-colors py-2 sm:hidden"
+              className="text-sm font-medium text-white/60 hover:text-white/90 transition-colors py-2"
             >
-              {t("logIn")}
+              {t("logIn")} →
             </button>
           </div>
         </motion.div>

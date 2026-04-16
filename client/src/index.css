@@ -128,6 +128,15 @@
     @apply bg-white/30 dark:bg-black/30 hover:bg-white/50 dark:hover:bg-black/50 backdrop-blur-md border border-white/30 dark:border-white/10 transition-all duration-300 shadow-sm;
   }
 
+  /* Hide scrollbar while keeping scroll functionality */
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   /* Custom Scrollbar for sleek look */
   ::-webkit-scrollbar {
     width: 6px;

@@ -7,8 +7,9 @@ import {
   Shield, Flame,
   LogIn, Hash, Download, Maximize2,
   File, User as UserIcon, Unlock,
-  Users, Smartphone,
+  Users, Smartphone, Shuffle,
 } from "lucide-react";
+
 import { io, Socket } from "socket.io-client";
 import type { Clip, RoomMessage, Attachment, User } from "@shared/schema";
 import { useT } from "../i18n";
@@ -18,6 +19,15 @@ import { OnboardingTooltip } from "../components/OnboardingTooltip";
 import { ClipCard } from "../components/ClipCard";
 import { SettingsModal } from "../components/SettingsModal";
 import { detectType, getDeviceName, formatFileSize, downloadDataUrl } from "../lib/clipUtils";
+
+function generateRoomCode() {
+  const consonants = "bcdfghjklmnpqrstvwxz";
+  const vowels = "aeiou";
+  const digits = "2456789";
+  return [consonants, vowels, consonants, vowels, digits, digits]
+    .map((s) => s[Math.floor(Math.random() * s.length)])
+    .join("");
+}
 
 export default function Home() {
   const { t, lang, setLang } = useT();
@@ -451,35 +461,49 @@ export default function Home() {
     return (
       <div className="min-h-screen min-h-[100dvh] p-4 flex items-center justify-center font-sans relative overflow-hidden">
         <motion.div
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          className="glass-panel p-6 sm:p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/20 relative"
+          initial={{ opacity: 0, y: 12, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+          className="glass-panel p-6 sm:p-8 rounded-3xl w-full max-w-sm z-10 flex flex-col items-center shadow-2xl border border-white/30 relative"
         >
-          <div className="w-16 h-16 rounded-full bg-gradient-to-tr from-blue-500 to-cyan-400 flex items-center justify-center mb-5 shadow-lg">
-            <Scissors className="w-8 h-8 text-white" />
+          {/* Logo */}
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-500 to-cyan-400 flex items-center justify-center mb-4 shadow-lg shadow-blue-500/20">
+            <Scissors className="w-7 h-7 text-white" />
           </div>
-          <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1" data-testid="text-app-title">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-0.5" data-testid="text-app-title">
             CloudClip
           </h2>
-          <p className="text-gray-500 dark:text-gray-300 text-sm mb-6 text-center">
+          <p className="text-gray-500 dark:text-gray-400 text-xs mb-5 text-center">
             {t("enterRoomCode")}
           </p>
 
-          <div className="w-full space-y-3">
+          <div className="w-full space-y-2.5">
+            {/* Room code input */}
             <div
               className={`relative transition-all duration-300 ${onboardHighlight(0)}`}
               data-testid="onboard-target-input"
             >
-              <Hash className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none" />
+              <Hash className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <input
                 type="text"
                 value={roomInput}
-                onChange={(e) => setRoomInput(e.target.value)}
+                onChange={(e) => setRoomInput(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, ""))}
                 onKeyDown={(e) => { if (e.key === "Enter") handleJoinRoom(); }}
-                className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-10 pr-4 py-3 text-gray-900 dark:text-white text-lg outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors placeholder-gray-400"
+                className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-9 pr-20 py-3 text-gray-900 dark:text-white font-mono font-semibold tracking-wider outline-none focus:bg-black/10 dark:focus:bg-white/20 focus:border-blue-400/50 transition-all placeholder-gray-400 placeholder:font-sans placeholder:font-normal placeholder:tracking-normal"
                 placeholder={t("roomCode")}
+                maxLength={12}
                 data-testid="input-room-code"
               />
+              {/* Generate random code button */}
+              <button
+                onClick={() => setRoomInput(generateRoomCode())}
+                className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-semibold text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 bg-black/5 dark:bg-white/10 hover:bg-blue-500/10 px-2 py-1 rounded-lg transition-all"
+                title={t("generateRoom")}
+                data-testid="button-generate-room"
+              >
+                <Shuffle className="w-3 h-3" />
+                <span>{t("generateRoom")}</span>
+              </button>
               {showOnboarding && onboardingStep === 0 && (
                 <OnboardingTooltip
                   position="bottom"
@@ -495,9 +519,16 @@ export default function Home() {
             </div>
 
             {joinError && (
-              <p className="text-red-400 text-xs text-center">{joinError}</p>
+              <motion.p
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="text-red-400 text-xs text-center bg-red-500/10 rounded-lg px-3 py-1.5"
+              >
+                {joinError}
+              </motion.p>
             )}
 
+            {/* Join button */}
             <div
               className={`relative transition-all duration-300 ${onboardHighlight(1)}`}
               data-testid="onboard-target-join"
@@ -505,11 +536,14 @@ export default function Home() {
               <button
                 onClick={handleJoinRoom}
                 disabled={!roomInput.trim() || joining}
-                className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+                className="w-full py-3 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-black font-semibold shadow-lg hover:bg-gray-800 dark:hover:bg-gray-100 active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed"
                 data-testid="button-join-room"
               >
-                {joining ? <RefreshCw className="w-5 h-5 animate-spin" /> : <LogIn className="w-5 h-5" />}
-                {joining ? t("joining") : t("joinRoom")}
+                {joining
+                  ? <RefreshCw className="w-4 h-4 animate-spin" />
+                  : <LogIn className="w-4 h-4" />
+                }
+                <span>{joining ? t("joining") : t("joinRoom")}</span>
               </button>
 
               {showOnboarding && onboardingStep === 1 && (
@@ -527,32 +561,34 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="mt-6 pt-4 border-t border-white/10 w-full text-center">
+          {/* Footer */}
+          <div className="mt-5 pt-4 border-t border-black/5 dark:border-white/10 w-full">
             {currentUser ? (
-              <div className="flex items-center justify-center gap-2 text-sm text-gray-500 dark:text-gray-300">
-                <UserIcon className="w-4 h-4 text-blue-400" />
-                <span className="font-medium text-gray-900 dark:text-white">{currentUser.username}</span>
+              <div className="flex items-center justify-center gap-2 text-sm">
+                <div className="w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center">
+                  <UserIcon className="w-3.5 h-3.5 text-blue-500" />
+                </div>
+                <span className="font-medium text-gray-800 dark:text-white text-sm">{currentUser.username}</span>
                 <button
                   onClick={() => { setCurrentUser(null); localStorage.removeItem("cloudclip-user"); }}
-                  className="text-xs text-gray-500 hover:text-red-400 ml-1 transition-colors"
+                  className="text-xs text-gray-400 hover:text-red-400 transition-colors ml-0.5"
                 >
-                  {t("logOut")}
+                  ({t("logOut")})
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-center gap-3 text-sm">
-                <a href="/login" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-login">
+              <div className="flex items-center justify-center gap-3 text-xs text-gray-500">
+                <a href="/login" className="text-blue-500 hover:text-blue-400 font-medium transition-colors" data-testid="link-login">
                   {t("logIn")}
                 </a>
-                <span className="text-gray-600">|</span>
-                <a href="/register" className="text-blue-400 hover:text-blue-300 font-medium transition-colors" data-testid="link-register">
+                <span className="opacity-40">·</span>
+                <a href="/register" className="text-blue-500 hover:text-blue-400 font-medium transition-colors" data-testid="link-register">
                   {t("signUp")}
                 </a>
+                <span className="opacity-40">·</span>
+                <LangToggle lang={lang} setLang={setLang} />
               </div>
             )}
-          </div>
-          <div className="mt-3">
-            <LangToggle lang={lang} setLang={setLang} />
           </div>
         </motion.div>
       </div>

@@ -140,7 +140,12 @@ const en = {
   room: "Room",
   qrCodeSection: "QR Code",
   scanToJoin: "Scan to join this room instantly",
-};
+  generateRoom: "Generate",
+  orGenerate: "or generate a new code",
+  copy: "Copy",
+  copyCode: "Copy code",
+  codeCopied: "Copied!",
+}
 
 const zh: typeof en = {
   cloudclip: "CloudClip",
@@ -284,6 +289,11 @@ const zh: typeof en = {
   room: "房间",
   qrCodeSection: "二维码",
   scanToJoin: "扫描二维码即刻加入此房间",
+  generateRoom: "随机生成",
+  orGenerate: "或随机生成房间号",
+  copy: "复制",
+  copyCode: "复制房间号",
+  codeCopied: "已复制！",
 };
 
 export type Lang = "en" | "zh";
