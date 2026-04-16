@@ -6,7 +6,7 @@ import {
   Eye, EyeOff, Download, Smartphone,
 } from "lucide-react";
 import type { Clip, Attachment } from "@shared/schema";
-import { formatFileSize, downloadDataUrl } from "../lib/clipUtils";
+import { formatFileSize, downloadDataUrl, getDeviceName } from "../lib/clipUtils";
 
 export function ClipCard({
   clip,
@@ -48,6 +48,9 @@ export function ClipCard({
     hour: "numeric",
     minute: "2-digit",
   });
+
+  const currentDevice = getDeviceName();
+  const isCurrentDevice = clip.sourceDevice === currentDevice;
 
   const hasAttachments = clip.attachments && clip.attachments.length > 0;
   const firstImageAtt = clip.attachments?.find((a) => a.mimeType.startsWith("image/"));
@@ -160,10 +163,18 @@ export function ClipCard({
           isImageOnly ? "text-white" : "text-gray-500 dark:text-gray-400"
         }`}
       >
-        <div className="flex flex-col">
+        <div className="flex flex-col min-w-0">
           <span className="text-[10px] font-medium opacity-80">{formattedTime}</span>
-          <span className="text-[10px] opacity-60 flex items-center gap-1">
-            <Smartphone className="w-2.5 h-2.5" /> {clip.sourceDevice}
+          <span
+            className={`text-[10px] flex items-center gap-1 min-w-0 ${
+              isCurrentDevice
+                ? "text-blue-500 dark:text-blue-400 font-semibold opacity-90"
+                : "opacity-60"
+            }`}
+            data-testid={`label-device-${clip.id}`}
+          >
+            <Smartphone className="w-2.5 h-2.5 flex-shrink-0" />
+            <span className="truncate">{clip.sourceDevice}</span>
           </span>
         </div>
         <div className="flex items-center gap-1 bg-white/40 dark:bg-black/40 backdrop-blur-md rounded-xl p-1 shadow-sm opacity-0 group-hover:opacity-100 transition-all translate-y-2 group-hover:translate-y-0">
