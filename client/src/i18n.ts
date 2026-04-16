@@ -138,6 +138,8 @@ const en = {
   clipboardDenied: "Clipboard access denied.",
   failedCopy: "Failed to copy.",
   room: "Room",
+  qrCodeSection: "QR Code",
+  scanToJoin: "Scan to join this room instantly",
 };
 
 const zh: typeof en = {
@@ -280,6 +282,8 @@ const zh: typeof en = {
   clipboardDenied: "剪贴板访问被拒绝。",
   failedCopy: "复制失败。",
   room: "房间",
+  qrCodeSection: "二维码",
+  scanToJoin: "扫描二维码即刻加入此房间",
 };
 
 export type Lang = "en" | "zh";

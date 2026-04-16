@@ -25,7 +25,18 @@ export default function Home() {
   const [isLocked, setIsLocked] = useState(false);
   const [lockPin, setLockPin] = useState("");
 
-  const savedRoom = localStorage.getItem("cloudclip-room") || "";
+  const { savedRoom, initialRoomInput } = (() => {
+    const urlRoom = new URLSearchParams(window.location.search).get("room") || "";
+    const stored = localStorage.getItem("cloudclip-room") || "";
+    if (urlRoom) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+    if (urlRoom && urlRoom !== stored) {
+      return { savedRoom: "", initialRoomInput: urlRoom };
+    }
+    return { savedRoom: stored, initialRoomInput: urlRoom };
+  })();
+
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem("cloudclip-onboarded"));
   const [onboardingStep, setOnboardingStep] = useState(() => savedRoom ? 2 : 0);
 
@@ -44,7 +55,7 @@ export default function Home() {
   });
 
   const [roomCode, setRoomCode] = useState(savedRoom);
-  const [roomInput, setRoomInput] = useState("");
+  const [roomInput, setRoomInput] = useState(initialRoomInput);
   const [joinError, setJoinError] = useState("");
   const [joining, setJoining] = useState(false);
   const [needPassword, setNeedPassword] = useState(false);

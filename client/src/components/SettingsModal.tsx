@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, X, Hash, Users, Shield, Unlock, Lock,
-  RefreshCw, Timer, LogOut,
+  RefreshCw, Timer, LogOut, QrCode,
 } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
 import type { Clip, User } from "@shared/schema";
 import { useT, type Lang } from "../i18n";
 import { PinInput } from "./PinInput";
@@ -176,6 +177,27 @@ export function SettingsModal({
                 </div>
                 <span className="text-lg font-bold">{onlineCount}</span>
               </div>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
+              {t("qrCodeSection")}
+            </h3>
+            <div className="glass-card p-4 rounded-2xl flex flex-col items-center gap-3" data-testid="section-qr-code">
+              <div className="bg-white p-3 rounded-xl shadow-sm" data-testid="qr-code-image">
+                <QRCodeSVG
+                  value={`${window.location.origin}?room=${encodeURIComponent(roomCode)}`}
+                  size={160}
+                  bgColor="#ffffff"
+                  fgColor="#000000"
+                  level="M"
+                />
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center flex items-center gap-1.5">
+                <QrCode className="w-3.5 h-3.5 shrink-0" />
+                {t("scanToJoin")}
+              </p>
             </div>
           </section>
 
