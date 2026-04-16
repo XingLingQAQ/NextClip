@@ -222,6 +222,7 @@ export function SettingsModal({
                 </div>
                 {hasPassword && isOwner && (
                   <button
+                    data-testid="button-remove-password"
                     onClick={() => handleSetPassword(null)}
                     disabled={savingPassword}
                     className="text-xs text-red-400 hover:text-red-300 transition-colors"
@@ -234,6 +235,7 @@ export function SettingsModal({
                 <div className="space-y-2">
                   <PinInput value={roomPassword} onChange={setRoomPassword} />
                   <button
+                    data-testid="button-set-password"
                     onClick={() => {
                       if (roomPassword.length === 6) handleSetPassword(roomPassword);
                     }}
