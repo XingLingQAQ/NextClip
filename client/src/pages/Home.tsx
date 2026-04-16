@@ -29,10 +29,14 @@ export default function Home() {
   const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem("cloudclip-onboarded"));
   const [onboardingStep, setOnboardingStep] = useState(() => savedRoom ? 2 : 0);
 
-  const finishOnboarding = () => {
+  const finishOnboarding = useCallback(() => {
     localStorage.setItem("cloudclip-onboarded", "1");
     setShowOnboarding(false);
-  };
+  }, []);
+
+  const advanceOnboarding = useCallback(() => {
+    setOnboardingStep((s) => s + 1);
+  }, []);
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem("cloudclip-user");
@@ -79,6 +83,22 @@ export default function Home() {
   useEffect(() => {
     localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
   }, [starredIds]);
+
+  useEffect(() => {
+    if (!showOnboarding) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") finishOnboarding();
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) advanceOnboarding();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [showOnboarding, finishOnboarding, advanceOnboarding]);
+
+  useEffect(() => {
+    if (roomCode && showOnboarding && onboardingStep < 2) {
+      setOnboardingStep(2);
+    }
+  }, [roomCode, showOnboarding, onboardingStep]);
 
   const connectSocket = useCallback((code: string, token?: string) => {
     if (token) roomTokenRef.current = token;
