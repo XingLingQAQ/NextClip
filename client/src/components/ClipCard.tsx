@@ -29,7 +29,7 @@ export function ClipCard({
   onPreviewAttachment: (att: Attachment) => void;
   t: (key: any) => string;
 }) {
-  const [showSensitive, setShowSensitive] = useState(!clip.isSensitive);
+  const [showSensitive, setShowSensitive] = useState(!(clip.isSensitive || clip.burnAfterRead));
 
   const getIcon = (type: Clip["type"]) => {
     switch (type) {
@@ -69,6 +69,7 @@ export function ClipCard({
         isImageOnly ? "h-[200px]" : "min-h-[148px]"
       } ${clip.burnAfterRead ? "border-red-400/30 dark:border-red-500/20" : ""}`}
       onClick={() => {
+        if ((clip.isSensitive || clip.burnAfterRead) && !showSensitive) return;
         isImageOnly && firstImageAtt ? onPreviewAttachment(firstImageAtt) : onOpenDetail();
       }}
       data-testid={`card-clip-${clip.id}`}
@@ -106,15 +107,29 @@ export function ClipCard({
 
       {/* Content */}
       <div className={`px-4 flex-1 relative ${isImageOnly ? "overflow-hidden pb-10" : "pb-2"}`}>
-        {clip.isSensitive && !showSensitive ? (
+        {(clip.isSensitive || clip.burnAfterRead) && !showSensitive ? (
           <div className="flex flex-col items-center justify-center h-full text-center py-2">
             <p className="text-xl tracking-[0.4em] font-mono opacity-30">•••••••</p>
-            <button
-              onClick={(e) => { e.stopPropagation(); setShowSensitive(true); }}
-              className="mt-2 text-xs flex items-center gap-1 text-blue-500 hover:text-blue-400 transition-colors"
-            >
-              <Eye className="w-3 h-3" /> {t("tapToReveal")}
-            </button>
+            {clip.burnAfterRead ? (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowSensitive(true);
+                  onCopy(true);
+                  setTimeout(() => setShowSensitive(false), 4000);
+                }}
+                className="mt-2 text-xs flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors font-medium"
+              >
+                <Flame className="w-3 h-3" /> {t("readAndBurn")}
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); setShowSensitive(true); }}
+                className="mt-2 text-xs flex items-center gap-1 text-blue-500 hover:text-blue-400 transition-colors"
+              >
+                <Eye className="w-3 h-3" /> {t("tapToReveal")}
+              </button>
+            )}
           </div>
         ) : isImageOnly && firstImageAtt ? (
           <div className="absolute inset-0 -mx-4 -mt-2">

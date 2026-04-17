@@ -812,7 +812,7 @@ export default function Home() {
                     <Shield className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setComposeSettings((s) => ({ ...s, burn: !s.burn }))}
+                    onClick={() => setComposeSettings((s) => ({ burn: !s.burn, sensitive: !s.burn ? true : s.sensitive }))}
                     className={`p-2 rounded-lg transition-colors ${composeSettings.burn ? "bg-red-500/20 text-red-600 dark:text-red-400" : "hover:bg-white/20 text-gray-500 dark:text-gray-400"}`}
                     title={t("burnAfterRead")}
                     data-testid="button-burn"
