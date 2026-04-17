@@ -114,7 +114,7 @@ export default function Landing() {
       )}
 
       {/* ===== Hero ===== */}
-      <main className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-4 sm:px-6 py-8 sm:py-0 mt-0 sm:mt-[-40px] md:mt-[-60px]">
+      <main className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-4 sm:px-6 py-8 sm:py-12">
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
@@ -126,7 +126,7 @@ export default function Landing() {
             {t("e2eLabel")}
           </div>
 
-          <h1 className="text-3xl xs:text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold tracking-tight text-white mb-4 sm:mb-6 drop-shadow-xl leading-tight">
+          <h1 className="text-4xl sm:text-6xl md:text-7xl lg:text-8xl font-extrabold tracking-tight text-white mb-4 sm:mb-6 drop-shadow-xl leading-tight">
             {t("heroTitle1")} <br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-cyan-300 to-purple-400">
               {t("heroTitle2")}

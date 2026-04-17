@@ -647,14 +647,14 @@ export default function Home() {
             </div>
           </div>
 
-          <nav className="flex-row overflow-x-auto md:flex-col space-y-0 md:space-y-1 flex-none md:flex-1 md:overflow-y-auto pb-1 md:pb-4 scrollbar-hide flex md:block gap-1.5 items-center -mx-3 px-3 md:mx-0 md:px-0">
-            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">
+          <nav className="hidden md:block md:space-y-1 md:flex-1 md:overflow-y-auto md:pb-4 scrollbar-hide">
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3 mt-4">
               {t("library")}
             </div>
             <NavItem icon={<Clock />} label={t("recent")} active={activeFilter === "all"} onClick={() => setActiveFilter("all")} />
             <NavItem icon={<Star />} label={t("favorites")} active={activeFilter === "starred"} onClick={() => setActiveFilter("starred")} />
-            <div className="hidden md:block h-px w-full bg-white/20 my-3" />
-            <div className="hidden md:block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">
+            <div className="h-px w-full bg-white/20 my-3" />
+            <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 px-3">
               {t("types")}
             </div>
             <NavItem icon={<FileText />} label={t("texts")} active={activeFilter === "text"} onClick={() => setActiveFilter("text")} count={clips.filter((c) => c.type === "text").length} />
@@ -716,7 +716,7 @@ export default function Home() {
         </div>
 
         {/* ===== Main Content ===== */}
-        <div className="flex-1 flex flex-col min-w-0 bg-white/5 dark:bg-black/5 pb-[120px] md:pb-0 h-full overflow-hidden">
+        <div className="flex-1 flex flex-col min-w-0 bg-white/5 dark:bg-black/5 pb-[144px] md:pb-0 h-full overflow-hidden">
           <header className="p-3 sm:p-5 pb-2 flex-shrink-0">
             <div
               onDragOver={handleDragOver}
@@ -768,7 +768,7 @@ export default function Home() {
               </div>
 
               <div className="flex items-center justify-between gap-2 p-2 px-3 bg-black/5 dark:bg-white/5 border-t border-white/10">
-                <div className="flex items-center gap-1 flex-wrap">
+                <div className="flex items-center gap-0.5 sm:gap-1 flex-shrink overflow-hidden min-w-0">
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     className="p-2 rounded-lg hover:bg-white/20 text-gray-500 dark:text-gray-400 transition-colors"
