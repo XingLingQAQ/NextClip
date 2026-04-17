@@ -64,6 +64,11 @@ export default function Home() {
     return saved ? JSON.parse(saved) : null;
   });
 
+  const [isRoomCreator, setIsRoomCreator] = useState<boolean>(() => {
+    if (!savedRoom) return false;
+    return localStorage.getItem(`cloudclip-creator-${savedRoom}`) === "1";
+  });
+
   const [roomCode, setRoomCode] = useState(savedRoom);
   const [roomInput, setRoomInput] = useState(initialRoomInput);
   const [joinError, setJoinError] = useState("");
@@ -178,6 +183,10 @@ export default function Home() {
       localStorage.setItem("cloudclip-room", code);
       localStorage.removeItem("cloudclip-room-pwd");
       localStorage.setItem("cloudclip-room-token", data.token);
+      if (data.created) {
+        setIsRoomCreator(true);
+        localStorage.setItem(`cloudclip-creator-${code}`, "1");
+      }
       connectSocket(code, data.token);
       if (showOnboarding && onboardingStep < 2) setOnboardingStep(2);
     } catch {
@@ -317,7 +326,9 @@ export default function Home() {
   const handleLeaveRoom = () => {
     socketRef.current?.disconnect();
     socketRef.current = null;
+    if (roomCode) localStorage.removeItem(`cloudclip-creator-${roomCode}`);
     setRoomCode("");
+    setIsRoomCreator(false);
     setClips([]);
     setIsConnected(false);
     setOnlineCount(0);
@@ -1147,6 +1158,7 @@ export default function Home() {
             clips={clips}
             currentUser={currentUser}
             roomToken={roomTokenRef.current}
+            isRoomCreator={isRoomCreator}
             onClose={() => setShowSettings(false)}
             onLeave={() => { handleLeaveRoom(); setShowSettings(false); }}
             lang={lang}

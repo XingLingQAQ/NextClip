@@ -27,6 +27,7 @@ export function SettingsModal({
   clips,
   currentUser,
   roomToken,
+  isRoomCreator,
   onClose,
   onLeave,
   lang,
@@ -37,6 +38,7 @@ export function SettingsModal({
   clips: Clip[];
   currentUser: User | null;
   roomToken: string;
+  isRoomCreator: boolean;
   onClose: () => void;
   onLeave: () => void;
   lang: Lang;
@@ -51,7 +53,7 @@ export function SettingsModal({
   const [savingExpiry, setSavingExpiry] = useState(false);
   const [ownerId, setOwnerId] = useState<string | null>(null);
 
-  const isOwner = currentUser && ownerId && currentUser.id === ownerId;
+  const isOwner = isRoomCreator || (!!currentUser && !!ownerId && currentUser.id === ownerId);
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`)
