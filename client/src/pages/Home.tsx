@@ -19,6 +19,14 @@ import { OnboardingTooltip } from "../components/OnboardingTooltip";
 import { ClipCard } from "../components/ClipCard";
 import { SettingsModal } from "../components/SettingsModal";
 import { detectType, getDeviceName, formatFileSize, downloadDataUrl } from "../lib/clipUtils";
+import {
+  STORAGE_KEYS,
+  clearDeprecatedSensitiveStorage,
+  getSessionStorageWithTTL,
+  setSessionStorageWithTTL,
+} from "../lib/storagePolicy";
+
+const ROOM_PASSWORD_SESSION_TTL_MS = 30 * 60 * 1000;
 
 function generateRoomCode() {
   const consonants = "bcdfghjklmnpqrstvwxz";
@@ -37,7 +45,7 @@ export default function Home() {
 
   const { savedRoom, initialRoomInput } = (() => {
     const urlRoom = new URLSearchParams(window.location.search).get("room") || "";
-    const stored = localStorage.getItem("cloudclip-room") || "";
+    const stored = localStorage.getItem(STORAGE_KEYS.room) || "";
     if (urlRoom) {
       window.history.replaceState({}, "", window.location.pathname);
     }
@@ -47,11 +55,11 @@ export default function Home() {
     return { savedRoom: stored, initialRoomInput: urlRoom };
   })();
 
-  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem("cloudclip-onboarded"));
+  const [showOnboarding, setShowOnboarding] = useState(() => !localStorage.getItem(STORAGE_KEYS.onboarded));
   const [onboardingStep, setOnboardingStep] = useState(() => savedRoom ? 2 : 0);
 
   const finishOnboarding = useCallback(() => {
-    localStorage.setItem("cloudclip-onboarded", "1");
+    localStorage.setItem(STORAGE_KEYS.onboarded, "1");
     setShowOnboarding(false);
   }, []);
 
@@ -59,14 +67,11 @@ export default function Home() {
     setOnboardingStep((s) => s + 1);
   }, []);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem("cloudclip-user");
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [isRoomCreator, setIsRoomCreator] = useState<boolean>(() => {
     if (!savedRoom) return false;
-    return localStorage.getItem(`cloudclip-creator-${savedRoom}`) === "1";
+    return localStorage.getItem(`${STORAGE_KEYS.roomCreatorPrefix}${savedRoom}`) === "1";
   });
 
   const [roomCode, setRoomCode] = useState(savedRoom);
@@ -80,11 +85,10 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const socketRef = useRef<Socket | null>(null);
-  const roomTokenRef = useRef<string>("");
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [starredIds, setStarredIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem("cloudclip-starred");
+    const saved = localStorage.getItem(STORAGE_KEYS.favorites);
     return saved ? new Set(JSON.parse(saved)) : new Set();
   });
   const [searchQuery, setSearchQuery] = useState("");
@@ -107,8 +111,18 @@ export default function Home() {
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
+    localStorage.setItem(STORAGE_KEYS.favorites, JSON.stringify(Array.from(starredIds)));
   }, [starredIds]);
+
+  useEffect(() => {
+    clearDeprecatedSensitiveStorage();
+    fetch("/api/auth/me")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.user) setCurrentUser(data.user);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!showOnboarding) return;
@@ -126,13 +140,12 @@ export default function Home() {
     }
   }, [roomCode, showOnboarding, onboardingStep]);
 
-  const connectSocket = useCallback((code: string, token?: string) => {
-    if (token) roomTokenRef.current = token;
+  const connectSocket = useCallback((code: string) => {
     if (socketRef.current) socketRef.current.disconnect();
     const socket = io(window.location.origin, { transports: ["websocket", "polling"], path: "/socket.io" });
     socket.on("connect", () => {
       setIsConnected(true);
-      socket.emit("join-room", { roomCode: code, token: roomTokenRef.current });
+      socket.emit("join-room", { roomCode: code });
     });
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("room-error", () => { handleLeaveRoom(); });
@@ -180,14 +193,13 @@ export default function Home() {
       }
 
       setRoomCode(code);
-      localStorage.setItem("cloudclip-room", code);
-      localStorage.removeItem("cloudclip-room-pwd");
-      localStorage.setItem("cloudclip-room-token", data.token);
+      localStorage.setItem(STORAGE_KEYS.room, code);
+      sessionStorage.removeItem(STORAGE_KEYS.roomPwdSession);
       if (data.created) {
         setIsRoomCreator(true);
-        localStorage.setItem(`cloudclip-creator-${code}`, "1");
+        localStorage.setItem(`${STORAGE_KEYS.roomCreatorPrefix}${code}`, "1");
       }
-      connectSocket(code, data.token);
+      connectSocket(code);
       if (showOnboarding && onboardingStep < 2) setOnboardingStep(2);
     } catch {
       setJoinError(t("networkError"));
@@ -214,12 +226,11 @@ export default function Home() {
       }
       const data = await res.json();
       setRoomCode(pendingRoomCode);
-      localStorage.setItem("cloudclip-room", pendingRoomCode);
-      localStorage.setItem("cloudclip-room-pwd", passwordInput);
-      localStorage.setItem("cloudclip-room-token", data.token);
+      localStorage.setItem(STORAGE_KEYS.room, pendingRoomCode);
+      setSessionStorageWithTTL(STORAGE_KEYS.roomPwdSession, passwordInput, ROOM_PASSWORD_SESSION_TTL_MS);
       setNeedPassword(false);
       setPendingRoomCode("");
-      connectSocket(pendingRoomCode, data.token);
+      connectSocket(pendingRoomCode);
       if (showOnboarding && onboardingStep < 2) setOnboardingStep(2);
     } catch {
       setPasswordError(t("networkError"));
@@ -229,36 +240,28 @@ export default function Home() {
 
   useEffect(() => {
     if (roomCode) {
-      const savedPwd = localStorage.getItem("cloudclip-room-pwd") || "";
-      const savedToken = localStorage.getItem("cloudclip-room-token") || "";
-      if (savedToken) {
-        roomTokenRef.current = savedToken;
-        connectSocket(roomCode, savedToken);
-      } else {
-        fetch(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: savedPwd || undefined }),
-        }).then(async (res) => {
-          if (res.ok) {
-            const data = await res.json();
-            localStorage.setItem("cloudclip-room-token", data.token);
-            connectSocket(roomCode, data.token);
+      const savedPwd = getSessionStorageWithTTL(STORAGE_KEYS.roomPwdSession);
+      fetch(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: savedPwd || undefined }),
+      }).then(async (res) => {
+        if (res.ok) {
+          connectSocket(roomCode);
+        } else {
+          const data = await res.json();
+          if (data.needPassword) {
+            setPendingRoomCode(roomCode);
+            setNeedPassword(true);
+            setRoomCode("");
+            localStorage.removeItem(STORAGE_KEYS.room);
           } else {
-            const data = await res.json();
-            if (data.needPassword) {
-              setPendingRoomCode(roomCode);
-              setNeedPassword(true);
-              setRoomCode("");
-              localStorage.removeItem("cloudclip-room");
-            } else {
-              setRoomCode("");
-              localStorage.removeItem("cloudclip-room");
-              localStorage.removeItem("cloudclip-room-pwd");
-            }
+            setRoomCode("");
+            localStorage.removeItem(STORAGE_KEYS.room);
+            sessionStorage.removeItem(STORAGE_KEYS.roomPwdSession);
           }
-        }).catch(() => {});
-      }
+        }
+      }).catch(() => {});
     }
     return () => { socketRef.current?.disconnect(); };
   }, []);
@@ -326,16 +329,14 @@ export default function Home() {
   const handleLeaveRoom = () => {
     socketRef.current?.disconnect();
     socketRef.current = null;
-    if (roomCode) localStorage.removeItem(`cloudclip-creator-${roomCode}`);
+    if (roomCode) localStorage.removeItem(`${STORAGE_KEYS.roomCreatorPrefix}${roomCode}`);
     setRoomCode("");
     setIsRoomCreator(false);
     setClips([]);
     setIsConnected(false);
     setOnlineCount(0);
-    localStorage.removeItem("cloudclip-room");
-    localStorage.removeItem("cloudclip-room-pwd");
-    localStorage.removeItem("cloudclip-room-token");
-    roomTokenRef.current = "";
+    localStorage.removeItem(STORAGE_KEYS.room);
+    sessionStorage.removeItem(STORAGE_KEYS.roomPwdSession);
   };
 
   const handleToggleStar = (id: string) => {
@@ -434,7 +435,10 @@ export default function Home() {
             <span className="font-mono font-bold text-white">{pendingRoomCode}</span>{" "}
             {t("roomProtected")}
           </p>
-          <p className="text-gray-400 text-xs mb-6 text-center">{t("enter6Digit")}</p>
+          <p className="text-gray-400 text-xs mb-2 text-center">{t("enter6Digit")}</p>
+          <p className="text-amber-300/90 text-[11px] mb-4 text-center">
+            临时记忆（30 分钟）：使用 sessionStorage（非安全存储）
+          </p>
           <div className="mb-4">
             <PinInput value={passwordInput} onChange={(v) => {
               setPasswordInput(v);
@@ -581,7 +585,10 @@ export default function Home() {
                 </div>
                 <span className="font-medium text-gray-800 dark:text-white text-sm">{currentUser.username}</span>
                 <button
-                  onClick={() => { setCurrentUser(null); localStorage.removeItem("cloudclip-user"); }}
+                  onClick={async () => {
+                    await fetch("/api/auth/logout", { method: "POST" });
+                    setCurrentUser(null);
+                  }}
                   className="text-xs text-gray-400 hover:text-red-400 transition-colors ml-0.5"
                 >
                   ({t("logOut")})
@@ -1157,7 +1164,6 @@ export default function Home() {
             onlineCount={onlineCount}
             clips={clips}
             currentUser={currentUser}
-            roomToken={roomTokenRef.current}
             isRoomCreator={isRoomCreator}
             onClose={() => setShowSettings(false)}
             onLeave={() => { handleLeaveRoom(); setShowSettings(false); }}

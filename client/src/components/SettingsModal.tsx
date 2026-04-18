@@ -26,7 +26,6 @@ export function SettingsModal({
   onlineCount,
   clips,
   currentUser,
-  roomToken,
   isRoomCreator,
   onClose,
   onLeave,
@@ -37,7 +36,6 @@ export function SettingsModal({
   onlineCount: number;
   clips: Clip[];
   currentUser: User | null;
-  roomToken: string;
   isRoomCreator: boolean;
   onClose: () => void;
   onLeave: () => void;
@@ -91,7 +89,6 @@ export function SettingsModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         password: pwd,
-        token: roomToken,
         userId: currentUser?.id,
       }),
     });
@@ -109,7 +106,6 @@ export function SettingsModal({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           expiryHours: hours,
-          token: roomToken,
           userId: currentUser?.id,
         }),
       }

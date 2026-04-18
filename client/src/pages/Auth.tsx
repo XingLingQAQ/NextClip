@@ -53,7 +53,6 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
         setLoading(false);
         return;
       }
-      localStorage.setItem("cloudclip-user", JSON.stringify(data.user));
       navigate("/app");
     } catch {
       setError(t("networkError"));

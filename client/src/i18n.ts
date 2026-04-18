@@ -1,3 +1,5 @@
+import { STORAGE_KEYS } from "./lib/storagePolicy";
+
 const en = {
   cloudclip: "CloudClip",
   enterRoomCode: "Enter a room code to join or create a room",
@@ -304,11 +306,11 @@ export type Translations = typeof en;
 const translations: Record<Lang, Translations> = { en, zh };
 
 export function getLang(): Lang {
-  return (localStorage.getItem("cloudclip-lang") as Lang) || "zh";
+  return (localStorage.getItem(STORAGE_KEYS.lang) as Lang) || "zh";
 }
 
 export function setLang(lang: Lang) {
-  localStorage.setItem("cloudclip-lang", lang);
+  localStorage.setItem(STORAGE_KEYS.lang, lang);
 }
 
 export function t(key: keyof Translations, lang?: Lang): string {

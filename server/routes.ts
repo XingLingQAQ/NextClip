@@ -1,9 +1,16 @@
-import type { Express } from "express";
+import type { Express, Request } from "express";
 import type { Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { storage } from "./storage";
 import type { RoomMessage } from "@shared/schema";
 import crypto from "crypto";
+
+declare module "express-session" {
+  interface SessionData {
+    userId?: string;
+    roomTokens?: Record<string, string>;
+  }
+}
 
 const VALID_EXPIRY = new Set(["1", "24", "168", "720", "permanent"]);
 
@@ -20,12 +27,21 @@ function validateRoomToken(roomCode: string, token: string): boolean {
   return roomTokens.get(roomCode)?.has(token) || false;
 }
 
-export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+function getSessionRoomToken(req: Request, roomCode: string): string {
+  return req.session?.roomTokens?.[roomCode] || "";
+}
+
+export async function registerRoutes(
+  httpServer: Server,
+  app: Express,
+  sessionMiddleware: any,
+): Promise<Server> {
   const io = new SocketIOServer(httpServer, {
     cors: { origin: "*" },
     path: "/socket.io",
     maxHttpBufferSize: 10 * 1024 * 1024,
   });
+  io.engine.use(sessionMiddleware as any);
 
   app.post("/api/auth/register", (req, res) => {
     const { username, password } = req.body;
@@ -35,6 +51,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const existing = storage.getUser(username.trim());
     if (existing) return res.status(409).json({ message: "Username already taken" });
     const user = storage.createUser(username.trim(), password);
+    req.session.userId = user.id;
     res.json({ success: true, user });
   });
 
@@ -43,7 +60,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!username || !password) return res.status(400).json({ message: "Username and password required" });
     const user = storage.verifyUser(username.trim(), password);
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    req.session.userId = user.id;
     res.json({ success: true, user });
+  });
+
+  app.get("/api/auth/me", (req, res) => {
+    const userId = req.session.userId;
+    if (!userId) return res.status(401).json({ message: "Not authenticated" });
+    const user = storage.getUserById(userId);
+    if (!user) return res.status(401).json({ message: "Not authenticated" });
+    res.json({ success: true, user });
+  });
+
+  app.post("/api/auth/logout", (req, res) => {
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      res.json({ success: true });
+    });
   });
 
   app.get("/api/rooms/:roomCode", (req, res) => {
@@ -69,7 +102,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       const verifiedUserId = userId ? (storage.getUserById(userId) ? userId : null) : null;
       storage.createRoom(roomCode, verifiedUserId || undefined, undefined, expiresAt);
       const token = issueRoomToken(roomCode);
-      return res.json({ success: true, created: true, hasPassword: false, token });
+      req.session.roomTokens = { ...(req.session.roomTokens || {}), [roomCode]: token };
+      return res.json({ success: true, created: true, hasPassword: false });
     }
 
     if (room.hasPassword) {
@@ -80,12 +114,14 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
 
     const token = issueRoomToken(roomCode);
-    res.json({ success: true, created: false, hasPassword: room.hasPassword, expiresAt: room.expiresAt, token });
+    req.session.roomTokens = { ...(req.session.roomTokens || {}), [roomCode]: token };
+    res.json({ success: true, created: false, hasPassword: room.hasPassword, expiresAt: room.expiresAt });
   });
 
   app.post("/api/rooms/:roomCode/password", (req, res) => {
     const { roomCode } = req.params;
-    const { password, token, userId } = req.body;
+    const { password, userId } = req.body;
+    const token = getSessionRoomToken(req, roomCode);
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -105,7 +141,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
 
   app.post("/api/rooms/:roomCode/expiry", (req, res) => {
     const { roomCode } = req.params;
-    const { expiryHours, token, userId } = req.body;
+    const { expiryHours, userId } = req.body;
+    const token = getSessionRoomToken(req, roomCode);
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
@@ -149,9 +186,9 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   io.on("connection", (socket) => {
     let currentRoom: string | null = null;
 
-    socket.on("join-room", (data: { roomCode: string; token: string } | string) => {
+    socket.on("join-room", (data: { roomCode: string } | string) => {
       const roomCode = typeof data === "string" ? data : data.roomCode;
-      const token = typeof data === "string" ? "" : data.token;
+      const token = (socket.request as any).session?.roomTokens?.[roomCode] || "";
 
       if (!validateRoomToken(roomCode, token)) {
         socket.emit("room-error", { message: "Invalid room token. Please rejoin." });
