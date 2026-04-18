@@ -7,6 +7,7 @@ import crypto from "crypto";
 const dbPath = path.resolve(process.cwd(), "clipboard.db");
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -38,11 +39,37 @@ db.exec(`
     metadata TEXT,
     is_sensitive INTEGER NOT NULL DEFAULT 0,
     burn_after_read INTEGER NOT NULL DEFAULT 0,
-    attachments TEXT
+    attachments TEXT,
+    deleted_at TEXT,
+    updated_at TEXT,
+    version INTEGER NOT NULL DEFAULT 1,
+    idempotency_key TEXT
   )
 `);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_clips_room ON clips(room_code)`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_clips_room_idempotency ON clips(room_code, idempotency_key) WHERE idempotency_key IS NOT NULL`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pinned_clips (
+    room_code TEXT NOT NULL,
+    clip_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(room_code, clip_id)
+  )
+`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_events (
+    id TEXT PRIMARY KEY,
+    room_code TEXT NOT NULL,
+    clip_id TEXT,
+    event_type TEXT NOT NULL,
+    actor_user_id TEXT,
+    actor_device_id TEXT,
+    payload TEXT,
+    created_at TEXT NOT NULL
+  )
+`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_audit_room_time ON audit_events(room_code, created_at DESC)`);
 
 function ensureColumn(table: string, col: string, def: string) {
   const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -54,6 +81,10 @@ ensureColumn("clips", "metadata", "TEXT");
 ensureColumn("clips", "is_sensitive", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("clips", "burn_after_read", "INTEGER NOT NULL DEFAULT 0");
 ensureColumn("clips", "attachments", "TEXT");
+ensureColumn("clips", "deleted_at", "TEXT");
+ensureColumn("clips", "updated_at", "TEXT");
+ensureColumn("clips", "version", "INTEGER NOT NULL DEFAULT 1");
+ensureColumn("clips", "idempotency_key", "TEXT");
 ensureColumn("rooms", "owner_id", "TEXT");
 ensureColumn("rooms", "expires_at", "TEXT");
 
@@ -129,13 +160,14 @@ function cleanExpiredRooms() {
   const now = new Date().toISOString();
   const expired = db.prepare(`SELECT room_code FROM rooms WHERE expires_at IS NOT NULL AND expires_at < ?`).all(now) as Array<{ room_code: string }>;
   for (const r of expired) {
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ?`).run(r.room_code);
     db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(r.room_code);
     db.prepare(`DELETE FROM rooms WHERE room_code = ?`).run(r.room_code);
   }
 }
 
 cleanExpiredRooms();
-setInterval(cleanExpiredRooms, 60 * 1000);
+setInterval(cleanExpiredRooms, 60 * 1000).unref();
 
 export const storage = {
   // ===== Users =====
@@ -220,25 +252,81 @@ export const storage = {
   },
 
   // ===== Clips =====
-  createClip(roomCode: string, content: string, type: string, sourceDevice: string,
-    metadata?: string, isSensitive?: boolean, burnAfterRead?: boolean, attachments?: any[]): Clip {
+  createClip(
+    roomCode: string,
+    content: string,
+    type: string,
+    sourceDevice: string,
+    metadata?: string,
+    isSensitive?: boolean,
+    burnAfterRead?: boolean,
+    attachments?: any[],
+    idempotencyKey?: string,
+  ): Clip {
+    if (idempotencyKey) {
+      const existing = db.prepare(`
+        SELECT * FROM clips
+        WHERE room_code = ? AND idempotency_key = ? AND deleted_at IS NULL
+      `).get(roomCode, idempotencyKey) as any;
+      if (existing) {
+        return {
+          id: existing.id,
+          roomCode: existing.room_code,
+          content: existing.content,
+          type: existing.type as Clip["type"],
+          timestamp: existing.timestamp,
+          sourceDevice: existing.source_device,
+          metadata: existing.metadata || undefined,
+          isSensitive: existing.is_sensitive === 1,
+          burnAfterRead: existing.burn_after_read === 1,
+          attachments: existing.attachments ? JSON.parse(existing.attachments) : undefined,
+        };
+      }
+    }
+
     const id = randomUUID();
     const timestamp = new Date().toISOString();
     const attJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
-    db.prepare(`INSERT INTO clips (id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(id, roomCode, content, type, timestamp, sourceDevice, metadata || null, isSensitive ? 1 : 0, burnAfterRead ? 1 : 0, attJson);
+    db.prepare(`
+      INSERT INTO clips (
+        id, room_code, content, type, timestamp, source_device, metadata, is_sensitive,
+        burn_after_read, attachments, updated_at, version, idempotency_key
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+    `).run(
+      id,
+      roomCode,
+      content,
+      type,
+      timestamp,
+      sourceDevice,
+      metadata || null,
+      isSensitive ? 1 : 0,
+      burnAfterRead ? 1 : 0,
+      attJson,
+      timestamp,
+      idempotencyKey || null,
+    );
     return { id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
       metadata: metadata || undefined, isSensitive: !!isSensitive, burnAfterRead: !!burnAfterRead,
       attachments: attachments || undefined };
   },
 
   updateClip(id: string, roomCode: string, content: string, type: string): boolean {
-    return db.prepare(`UPDATE clips SET content = ?, type = ? WHERE id = ? AND room_code = ?`).run(content, type, id, roomCode).changes > 0;
+    return db.prepare(`
+      UPDATE clips
+      SET content = ?, type = ?, updated_at = ?, version = version + 1
+      WHERE id = ? AND room_code = ? AND deleted_at IS NULL
+    `).run(content, type, new Date().toISOString(), id, roomCode).changes > 0;
   },
 
   getClipsByRoom(roomCode: string): Clip[] {
-    const rows = db.prepare(`SELECT * FROM clips WHERE room_code = ? ORDER BY timestamp DESC LIMIT 200`).all(roomCode) as any[];
+    const rows = db.prepare(`
+      SELECT * FROM clips
+      WHERE room_code = ? AND deleted_at IS NULL
+      ORDER BY timestamp DESC
+      LIMIT 200
+    `).all(roomCode) as any[];
     return rows.map((r) => ({
       id: r.id, roomCode: r.room_code, content: r.content, type: r.type, timestamp: r.timestamp,
       sourceDevice: r.source_device, metadata: r.metadata || undefined,
@@ -247,11 +335,144 @@ export const storage = {
     }));
   },
 
+  getClipsByRoomPage(roomCode: string, beforeTimestamp?: string, limit = 50): Clip[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+    const rows = beforeTimestamp
+      ? db.prepare(`
+          SELECT * FROM clips
+          WHERE room_code = ? AND deleted_at IS NULL AND timestamp < ?
+          ORDER BY timestamp DESC LIMIT ?
+        `).all(roomCode, beforeTimestamp, safeLimit) as any[]
+      : db.prepare(`
+          SELECT * FROM clips
+          WHERE room_code = ? AND deleted_at IS NULL
+          ORDER BY timestamp DESC LIMIT ?
+        `).all(roomCode, safeLimit) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      roomCode: r.room_code,
+      content: r.content,
+      type: r.type,
+      timestamp: r.timestamp,
+      sourceDevice: r.source_device,
+      metadata: r.metadata || undefined,
+      isSensitive: r.is_sensitive === 1,
+      burnAfterRead: r.burn_after_read === 1,
+      attachments: r.attachments ? JSON.parse(r.attachments) : undefined,
+    }));
+  },
+
+  getClipsSince(roomCode: string, sinceTimestamp: string, limit = 200): Clip[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 500);
+    const rows = db.prepare(`
+      SELECT * FROM clips
+      WHERE room_code = ? AND deleted_at IS NULL AND timestamp > ?
+      ORDER BY timestamp ASC
+      LIMIT ?
+    `).all(roomCode, sinceTimestamp, safeLimit) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      roomCode: r.room_code,
+      content: r.content,
+      type: r.type,
+      timestamp: r.timestamp,
+      sourceDevice: r.source_device,
+      metadata: r.metadata || undefined,
+      isSensitive: r.is_sensitive === 1,
+      burnAfterRead: r.burn_after_read === 1,
+      attachments: r.attachments ? JSON.parse(r.attachments) : undefined,
+    }));
+  },
+
+  getPinnedClipIds(roomCode: string): string[] {
+    const rows = db.prepare(`SELECT clip_id FROM pinned_clips WHERE room_code = ? ORDER BY created_at DESC`).all(roomCode) as Array<{ clip_id: string }>;
+    return rows.map((row) => row.clip_id);
+  },
+
+  setClipPinned(roomCode: string, clipId: string, pinned: boolean): boolean {
+    if (pinned) {
+      const exists = db.prepare(`SELECT 1 FROM clips WHERE id = ? AND room_code = ?`).get(clipId, roomCode);
+      if (!exists) return false;
+      db.prepare(`INSERT OR IGNORE INTO pinned_clips (room_code, clip_id, created_at) VALUES (?, ?, ?)`)
+        .run(roomCode, clipId, new Date().toISOString());
+      return true;
+    }
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?`).run(roomCode, clipId);
+    return true;
+  },
+
   deleteClip(id: string, roomCode: string): boolean {
-    return db.prepare(`DELETE FROM clips WHERE id = ? AND room_code = ?`).run(id, roomCode).changes > 0;
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?`).run(roomCode, id);
+    return db.prepare(`
+      UPDATE clips
+      SET deleted_at = ?, updated_at = ?, version = version + 1
+      WHERE id = ? AND room_code = ? AND deleted_at IS NULL
+    `).run(new Date().toISOString(), new Date().toISOString(), id, roomCode).changes > 0;
   },
 
   clearRoom(roomCode: string): number {
-    return db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(roomCode).changes;
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ?`).run(roomCode);
+    const now = new Date().toISOString();
+    return db.prepare(`
+      UPDATE clips
+      SET deleted_at = ?, updated_at = ?, version = version + 1
+      WHERE room_code = ? AND deleted_at IS NULL
+    `).run(now, now, roomCode).changes;
+  },
+
+  restoreClip(id: string, roomCode: string): boolean {
+    return db.prepare(`
+      UPDATE clips
+      SET deleted_at = NULL, updated_at = ?, version = version + 1
+      WHERE id = ? AND room_code = ? AND deleted_at IS NOT NULL
+    `).run(new Date().toISOString(), id, roomCode).changes > 0;
+  },
+
+  addAuditEvent(roomCode: string, eventType: string, clipId?: string, actorUserId?: string, actorDeviceId?: string, payload?: Record<string, unknown>): void {
+    db.prepare(`
+      INSERT INTO audit_events (id, room_code, clip_id, event_type, actor_user_id, actor_device_id, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      randomUUID(),
+      roomCode,
+      clipId || null,
+      eventType,
+      actorUserId || null,
+      actorDeviceId || null,
+      payload ? JSON.stringify(payload) : null,
+      new Date().toISOString(),
+    );
+  },
+
+  getAuditEvents(roomCode: string, limit = 100): Array<{
+    id: string;
+    roomCode: string;
+    clipId: string | null;
+    eventType: string;
+    actorUserId: string | null;
+    actorDeviceId: string | null;
+    payload?: Record<string, unknown>;
+    createdAt: string;
+  }> {
+    const safeLimit = Math.min(Math.max(limit, 1), 500);
+    const rows = db.prepare(`
+      SELECT * FROM audit_events
+      WHERE room_code = ?
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(roomCode, safeLimit) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      roomCode: r.room_code,
+      clipId: r.clip_id || null,
+      eventType: r.event_type,
+      actorUserId: r.actor_user_id || null,
+      actorDeviceId: r.actor_device_id || null,
+      payload: r.payload ? JSON.parse(r.payload) : undefined,
+      createdAt: r.created_at,
+    }));
   },
 };

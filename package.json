@@ -1,5 +1,5 @@
 {
-  "name": "rest-express",
+  "name": "cloudclip",
   "version": "1.0.0",
   "type": "module",
   "license": "MIT",
@@ -7,8 +7,11 @@
     "dev:client": "vite dev --port 5000",
     "dev": "NODE_ENV=development tsx server/index.ts",
     "build": "tsx script/build.ts",
+    "deploy:cloudflare": "npm run build && npx wrangler deploy",
+    "deploy:cloudflare:oneclick": "bash scripts/deploy-cloudflare.sh",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test": "tsx --test tests/**/*.test.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

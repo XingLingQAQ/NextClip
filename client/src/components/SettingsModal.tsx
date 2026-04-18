@@ -9,6 +9,7 @@ import type { Clip, User } from "@shared/schema";
 import { useT, type Lang } from "../i18n";
 import { PinInput } from "./PinInput";
 import { LangToggle } from "./LangToggle";
+import { fetchWithCsrf } from "../lib/http";
 
 const EXPIRY_OPTIONS_KEYS: Array<{
   labelKey: "hour1" | "hours24" | "days7" | "days30" | "permanent";
@@ -28,6 +29,8 @@ export function SettingsModal({
   currentUser,
   roomToken,
   isRoomCreator,
+  deviceName,
+  onDeviceNameSave,
   onClose,
   onLeave,
   lang,
@@ -39,6 +42,8 @@ export function SettingsModal({
   currentUser: User | null;
   roomToken: string;
   isRoomCreator: boolean;
+  deviceName: string;
+  onDeviceNameSave: (value: string) => void;
   onClose: () => void;
   onLeave: () => void;
   lang: Lang;
@@ -52,6 +57,7 @@ export function SettingsModal({
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [savingExpiry, setSavingExpiry] = useState(false);
   const [isOwner, setIsOwner] = useState<boolean>(isRoomCreator);
+  const [editingDeviceName, setEditingDeviceName] = useState(deviceName);
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`)
@@ -59,7 +65,7 @@ export function SettingsModal({
       .then((data) => {
         setHasPassword(data.hasPassword || false);
         setExpiresAt(data.expiresAt || null);
-        setIsOwner(!!data.isOwner || isRoomCreator);
+        setIsOwner(!!data.canManage || isRoomCreator);
         if (!data.expiresAt) {
           setSelectedExpiry("permanent");
         } else {
@@ -82,9 +88,13 @@ export function SettingsModal({
       });
   }, [roomCode]);
 
+  useEffect(() => {
+    setEditingDeviceName(deviceName);
+  }, [deviceName]);
+
   const handleSetPassword = async (pwd: string | null) => {
     setSavingPassword(true);
-    await fetch(`/api/rooms/${encodeURIComponent(roomCode)}/password`, {
+    await fetchWithCsrf(`/api/rooms/${encodeURIComponent(roomCode)}/password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -99,7 +109,7 @@ export function SettingsModal({
 
   const handleSetExpiry = async (hours: string) => {
     setSavingExpiry(true);
-    const res = await fetch(
+    const res = await fetchWithCsrf(
       `/api/rooms/${encodeURIComponent(roomCode)}/expiry`,
       {
         method: "POST",
@@ -156,6 +166,24 @@ export function SettingsModal({
               {t("connection")}
             </h3>
             <div className="space-y-3">
+              <div className="glass-card p-4 rounded-2xl space-y-2">
+                <div className="font-medium text-sm">{t("deviceName")}</div>
+                <div className="flex gap-2">
+                  <input
+                    value={editingDeviceName}
+                    onChange={(e) => setEditingDeviceName(e.target.value)}
+                    maxLength={32}
+                    className="flex-1 bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl px-3 py-2 text-sm"
+                    placeholder={t("deviceName")}
+                  />
+                  <button
+                    onClick={() => onDeviceNameSave(editingDeviceName)}
+                    className="px-3 py-2 rounded-xl text-sm font-medium bg-blue-600 text-white hover:bg-blue-700"
+                  >
+                    {t("save")}
+                  </button>
+                </div>
+              </div>
               <div className="glass-card p-4 rounded-2xl flex items-center justify-between">
                 <div>
                   <div className="font-medium flex items-center gap-2">

@@ -1,0 +1,11 @@
+name = "cloudclip"
+main = "workers/cloudflare-worker.js"
+compatibility_date = "2026-04-18"
+
+[assets]
+directory = "./dist/public"
+binding = "ASSETS"
+
+[vars]
+# Set this to your public origin server URL, e.g. https://api.example.com
+ORIGIN_BASE_URL = "https://your-origin.example.com"

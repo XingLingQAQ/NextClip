@@ -3,6 +3,8 @@ import { randomUUID } from "crypto";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import session from "express-session";
+import { SQLiteSessionStore } from "./session-store";
 
 const app = express();
 const httpServer = createServer(app);
@@ -70,6 +72,62 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+
+  if (process.env.NODE_ENV === "production") {
+    const csp = [
+      "default-src 'self'",
+      "connect-src 'self' ws: wss:",
+      "img-src 'self' data: blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; ");
+    res.setHeader("Content-Security-Policy", csp);
+  }
+
+  next();
+});
+
+declare module "express-session" {
+  interface SessionData {
+    userId?: string;
+  }
+}
+
+const sessionSecret = process.env.SESSION_SECRET || process.env.AUTH_SIGNING_SECRET;
+
+if (!sessionSecret) {
+  throw new Error("Missing session secret. Set SESSION_SECRET or AUTH_SIGNING_SECRET before startup.");
+}
+
+app.use(session({
+  secret: sessionSecret,
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+  },
+  store: new SQLiteSessionStore(),
+}));
+
+app.get("/healthz", (_req, res) => {
+  res.json({ ok: true });
+});
+
+app.get("/readyz", (_req, res) => {
+  res.json({ ready: true });
+});
 
 export function log(message: string, source = "express") {
   const formattedTime = new Date().toLocaleTimeString("en-US", {
