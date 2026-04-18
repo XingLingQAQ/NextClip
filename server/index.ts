@@ -72,6 +72,29 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+
+  if (process.env.NODE_ENV === "production") {
+    const csp = [
+      "default-src 'self'",
+      "connect-src 'self' ws: wss:",
+      "img-src 'self' data: blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline'",
+      "font-src 'self' data:",
+      "object-src 'none'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join("; ");
+    res.setHeader("Content-Security-Policy", csp);
+  }
+
+  next();
+});
 
 declare module "express-session" {
   interface SessionData {

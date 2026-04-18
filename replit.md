@@ -27,6 +27,8 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `client/src/pages/Auth.tsx` — Login/register page (i18n supported)
 - `client/src/i18n.ts` — Internationalization system (Chinese/English)
 - `client/src/App.tsx` — Router setup with wouter
+- `Dockerfile` / `docker-compose.dev.yml` — Containerized runtime/deploy baseline
+- `.github/workflows/ci.yml` — CI pipeline for typecheck/test/build
 
 ## Core Features
 1. **Room-based sync**: Enter room code to join/create. Password optional — only prompted when room has one set
@@ -53,6 +55,7 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 22. **Interactive onboarding**: Step-by-step tooltips pointing at UI elements (room code input → join button on join screen; compose area → send button → settings button on main app). Skippable, persisted in localStorage.
 23. **PinInput numbers-only**: Room password input accepts only digits (6-digit numeric PIN).
 24. **Custom device identity**: Device name can be edited in Settings and persisted in localStorage for cross-session targeting labels.
+25. **Security headers baseline**: Server sets CSP and common browser hardening headers in production.
 
 ## i18n System
 - File: `client/src/i18n.ts`
