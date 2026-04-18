@@ -56,11 +56,9 @@ function getRequestAuth(req: Request, roomCode: string) {
   };
   const token = String(req.header("x-room-token") || queryString(req.query.token) || rawBody.token || "");
   const sessionId = String(req.header("x-room-session") || queryString(req.query.sessionId) || rawBody.sessionId || "");
-  const userId = String(req.header("x-user-id") || queryString(req.query.userId) || rawBody.userId || "") || null;
   const session = sessionId ? roomSessions.get(sessionId) : undefined;
   const hasSessionIdentity = !!session && session.roomCode === roomCode;
   const validToken = !!token && validateRoomToken(roomCode, token);
-  const memberByUserId = isRoomMember(roomCode, userId);
   const memberBySession = !!session?.userId && isRoomMember(roomCode, session.userId);
   const room = storage.getRoom(roomCode);
   const passwordOk = !room?.hasPassword || !!session?.passwordVerified;
@@ -70,7 +68,6 @@ function getRequestAuth(req: Request, roomCode: string) {
     session,
     hasSessionIdentity,
     validToken,
-    memberByUserId,
     memberBySession,
     passwordOk,
   };
@@ -89,7 +86,7 @@ function requireRoomAccess() {
       return res.status(401).json({ message: "Unauthorized: session required" });
     }
 
-    if (!auth.memberByUserId && !auth.memberBySession && !auth.validToken) {
+    if (!auth.memberBySession && !auth.validToken) {
       return res.status(403).json({ message: "Forbidden: no room access" });
     }
 
