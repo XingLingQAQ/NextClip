@@ -7,7 +7,16 @@ import crypto from "crypto";
 
 const VALID_EXPIRY = new Set(["1", "24", "168", "720", "permanent"]);
 const AUTH_COOKIE_NAME = "session";
-const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || "dev-auth-secret-change-me";
+
+function getAuthSigningSecret(): string {
+  const secret = process.env.AUTH_SIGNING_SECRET;
+  if (!secret) {
+    throw new Error("AUTH_SIGNING_SECRET is required for authentication token signing");
+  }
+  return secret;
+}
+
+const AUTH_SIGNING_SECRET = getAuthSigningSecret();
 
 const roomTokens = new Map<string, Set<string>>();
 
@@ -98,10 +107,20 @@ const attachCurrentUser: RequestHandler = (req, _res, next) => {
   next();
 };
 
-function assertRoomOwner(roomCode: string, userId: string): { ok: true; room: NonNullable<ReturnType<typeof storage.getRoom>> } | { ok: false; status: number; message: string } {
+function assertRoomOwner(
+  roomCode: string,
+  userId: string,
+  hasValidRoomToken: boolean,
+): { ok: true; room: NonNullable<ReturnType<typeof storage.getRoom>> } | { ok: false; status: number; message: string } {
   const room = storage.getRoom(roomCode);
   if (!room) return { ok: false, status: 404, message: "Room not found" };
-  if (!room.ownerId || room.ownerId !== userId) {
+  if (!room.ownerId) {
+    if (!hasValidRoomToken) {
+      return { ok: false, status: 403, message: "Only the room owner can perform this action" };
+    }
+    return { ok: true, room };
+  }
+  if (room.ownerId !== userId) {
     return { ok: false, status: 403, message: "Only the room owner can perform this action" };
   }
   return { ok: true, room };
@@ -191,10 +210,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const password = typeof req.body?.password === "string" ? req.body.password : null;
     const token = typeof req.body?.token === "string" ? req.body.token : "";
     const currentUser = req.currentUser!;
-    if (!validateRoomToken(roomCode, token)) {
+    const hasValidRoomToken = validateRoomToken(roomCode, token);
+    if (!hasValidRoomToken) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    const ownerCheck = assertRoomOwner(roomCode, currentUser.id);
+    const ownerCheck = assertRoomOwner(roomCode, currentUser.id, hasValidRoomToken);
     if (!ownerCheck.ok) return res.status(ownerCheck.status).json({ message: ownerCheck.message });
     if (password) {
       if (password.length !== 6 || !/^\d{6}$/.test(password)) {
@@ -210,10 +230,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const expiryHours = typeof req.body?.expiryHours === "string" ? req.body.expiryHours : String(req.body?.expiryHours || "");
     const token = typeof req.body?.token === "string" ? req.body.token : "";
     const currentUser = req.currentUser!;
-    if (!validateRoomToken(roomCode, token)) {
+    const hasValidRoomToken = validateRoomToken(roomCode, token);
+    if (!hasValidRoomToken) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    const ownerCheck = assertRoomOwner(roomCode, currentUser.id);
+    const ownerCheck = assertRoomOwner(roomCode, currentUser.id, hasValidRoomToken);
     if (!ownerCheck.ok) return res.status(ownerCheck.status).json({ message: ownerCheck.message });
     if (!VALID_EXPIRY.has(String(expiryHours))) {
       return res.status(400).json({ message: "Invalid expiry value" });
