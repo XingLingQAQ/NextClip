@@ -29,6 +29,7 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `client/src/App.tsx` — Router setup with wouter
 - `Dockerfile` / `docker-compose.dev.yml` — Containerized runtime/deploy baseline
 - `.github/workflows/ci.yml` — CI pipeline for typecheck/test/build
+- `workers/cloudflare-worker.js` + `wrangler.toml` — Cloudflare Worker static hosting + API proxy deployment
 
 ## Core Features
 1. **Room-based sync**: Enter room code to join/create. Password optional — only prompted when room has one set
@@ -106,6 +107,14 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `POST /api/auth/login` — Login and get user info
 - `GET /api/auth/me` — Get current session user
 - `POST /api/auth/logout` — Logout current session
+
+## Cloudflare Worker Deployment
+- Local one-click: `npm run deploy:cloudflare:oneclick`
+- Script file: `scripts/deploy-cloudflare.sh` (requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`)
+- GitHub one-click: workflow `.github/workflows/deploy-cloudflare.yml` via **Run workflow**
+- Worker behavior:
+  - Static assets served from `dist/public`
+  - `/api/*` and `/socket.io/*` proxied to `ORIGIN_BASE_URL`
 
 ## Design System
 - Glassmorphism: `glass-panel`, `glass-card`, `glass-input`, `glass-button` utilities
