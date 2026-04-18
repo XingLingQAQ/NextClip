@@ -107,7 +107,7 @@ export default function Home() {
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
+    localStorage.setItem("cloudclip-starred", JSON.stringify(Array.from(starredIds)));
   }, [starredIds]);
 
   useEffect(() => {
