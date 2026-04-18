@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import type { Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { storage } from "./storage";
@@ -6,8 +6,10 @@ import type { RoomMessage } from "@shared/schema";
 import crypto from "crypto";
 
 const VALID_EXPIRY = new Set(["1", "24", "168", "720", "permanent"]);
+const GENERIC_JOIN_FAILURE_MESSAGE = "Room code or password is invalid";
 
 const roomTokens = new Map<string, Set<string>>();
+const rateLimitBuckets = new Map<string, { count: number; windowStart: number }>();
 
 function issueRoomToken(roomCode: string): string {
   const token = crypto.randomUUID();
@@ -18,6 +20,80 @@ function issueRoomToken(roomCode: string): string {
 
 function validateRoomToken(roomCode: string, token: string): boolean {
   return roomTokens.get(roomCode)?.has(token) || false;
+}
+
+function getClientIp(req: Request): string {
+  const forwarded = req.headers["x-forwarded-for"];
+  if (typeof forwarded === "string") return forwarded.split(",")[0].trim();
+  if (Array.isArray(forwarded) && forwarded.length > 0) return forwarded[0].split(",")[0].trim();
+  return req.ip || req.socket.remoteAddress || "unknown";
+}
+
+function applyRateLimit(
+  req: Request,
+  res: Response,
+  opts: {
+    scope: string;
+    max: number;
+    windowMs: number;
+    accountResolver: (req: Request) => string;
+  },
+): boolean {
+  const account = opts.accountResolver(req).toLowerCase();
+  const ip = getClientIp(req);
+  const now = Date.now();
+  const key = `${opts.scope}:${ip}:${account}`;
+  const bucket = rateLimitBuckets.get(key);
+
+  if (!bucket || now - bucket.windowStart >= opts.windowMs) {
+    rateLimitBuckets.set(key, { count: 1, windowStart: now });
+    return true;
+  }
+
+  if (bucket.count >= opts.max) {
+    return res.status(429).json({ message: "Too many requests. Please retry later." }), false;
+  }
+
+  bucket.count += 1;
+  rateLimitBuckets.set(key, bucket);
+  return true;
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function respondObfuscatedJoinFailure(res: Response): Promise<void> {
+  const jitterMs = 250 + Math.floor(Math.random() * 750);
+  await sleep(jitterMs);
+  res.status(403).json({ message: GENERIC_JOIN_FAILURE_MESSAGE });
+}
+
+function encodeBase32LowerNoPadding(input: Buffer): string {
+  const alphabet = "abcdefghijklmnopqrstuvwxyz234567";
+  let bits = 0;
+  let value = 0;
+  let output = "";
+
+  for (let i = 0; i < input.length; i += 1) {
+    const byte = input[i];
+    value = (value << 8) | byte;
+    bits += 8;
+    while (bits >= 5) {
+      output += alphabet[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+
+  if (bits > 0) {
+    output += alphabet[(value << (5 - bits)) & 31];
+  }
+
+  return output;
+}
+
+function generateSecureRoomCode(): string {
+  return encodeBase32LowerNoPadding(crypto.randomBytes(16)); // 128-bit entropy
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
@@ -39,6 +115,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/auth/login", (req, res) => {
+    if (!applyRateLimit(req, res, {
+      scope: "auth:login",
+      max: 10,
+      windowMs: 5 * 60 * 1000,
+      accountResolver: (r) => String(r.body?.username || "anonymous").trim() || "anonymous",
+    })) {
+      return;
+    }
+
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ message: "Username and password required" });
     const user = storage.verifyUser(username.trim(), password);
@@ -46,11 +131,35 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true, user });
   });
 
+  app.post("/api/rooms/code", (_req, res) => {
+    let roomCode = "";
+    do {
+      roomCode = generateSecureRoomCode();
+    } while (storage.roomExists(roomCode));
+
+    res.json({ roomCode, entropyBits: 128, encoding: "base32" });
+  });
+
   app.get("/api/rooms/:roomCode", (req, res) => {
-    const room = storage.getRoom(req.params.roomCode);
-    if (!room) return res.json({ exists: false });
+    if (!applyRateLimit(req, res, {
+      scope: "room:probe",
+      max: 20,
+      windowMs: 5 * 60 * 1000,
+      accountResolver: (r) => String(r.query.userId || "anonymous").trim() || "anonymous",
+    })) {
+      return;
+    }
+
+    const roomCode = req.params.roomCode;
+    const roomToken = String(req.headers["x-room-token"] || req.query.token || "");
+    if (!validateRoomToken(roomCode, roomToken)) {
+      return res.status(404).json({ message: "Unavailable" });
+    }
+
+    const room = storage.getRoom(roomCode);
+    if (!room) return res.status(404).json({ message: "Unavailable" });
+
     res.json({
-      exists: true,
       hasPassword: room.hasPassword,
       expiresAt: room.expiresAt,
       createdAt: room.createdAt,
@@ -58,24 +167,37 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
-  app.post("/api/rooms/:roomCode/join", (req, res) => {
+  app.post("/api/rooms/:roomCode/join", async (req, res) => {
+    if (!applyRateLimit(req, res, {
+      scope: "room:join",
+      max: 20,
+      windowMs: 5 * 60 * 1000,
+      accountResolver: (r) => String(r.body?.userId || r.params.roomCode || "anonymous").trim() || "anonymous",
+    })) {
+      return;
+    }
+
     const { roomCode } = req.params;
-    const { password, userId } = req.body;
+    const { password, userId, createIfMissing } = req.body;
     const room = storage.getRoom(roomCode);
 
     if (!room) {
-      let expiresAt: string | null = null;
-      expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
-      const verifiedUserId = userId ? (storage.getUserById(userId) ? userId : null) : null;
-      storage.createRoom(roomCode, verifiedUserId || undefined, undefined, expiresAt);
-      const token = issueRoomToken(roomCode);
-      return res.json({ success: true, created: true, hasPassword: false, token });
+      if (createIfMissing) {
+        const expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
+        const verifiedUserId = userId ? (storage.getUserById(userId) ? userId : null) : null;
+        storage.createRoom(roomCode, verifiedUserId || undefined, undefined, expiresAt);
+        const token = issueRoomToken(roomCode);
+        return res.json({ success: true, created: true, hasPassword: false, token });
+      }
+      await respondObfuscatedJoinFailure(res);
+      return;
     }
 
     if (room.hasPassword) {
       if (!password) return res.status(401).json({ message: "Password required", needPassword: true });
       if (!storage.verifyRoomPassword(roomCode, password)) {
-        return res.status(403).json({ message: "Incorrect password" });
+        await respondObfuscatedJoinFailure(res);
+        return;
       }
     }
 
@@ -84,6 +206,15 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/rooms/:roomCode/password", (req, res) => {
+    if (!applyRateLimit(req, res, {
+      scope: "room:password",
+      max: 12,
+      windowMs: 5 * 60 * 1000,
+      accountResolver: (r) => String(r.body?.userId || r.params.roomCode || "anonymous").trim() || "anonymous",
+    })) {
+      return;
+    }
+
     const { roomCode } = req.params;
     const { password, token, userId } = req.body;
     if (!validateRoomToken(roomCode, token)) {

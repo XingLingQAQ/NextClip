@@ -56,9 +56,12 @@ export function SettingsModal({
   const isOwner = isRoomCreator || (!!currentUser && !!ownerId && currentUser.id === ownerId);
 
   useEffect(() => {
-    fetch(`/api/rooms/${encodeURIComponent(roomCode)}`)
-      .then((r) => r.json())
+    fetch(`/api/rooms/${encodeURIComponent(roomCode)}?userId=${encodeURIComponent(currentUser?.id || "")}`, {
+      headers: { "x-room-token": roomToken },
+    })
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
+        if (!data) return;
         setHasPassword(data.hasPassword || false);
         setExpiresAt(data.expiresAt || null);
         setOwnerId(data.ownerId || null);
@@ -82,7 +85,7 @@ export function SettingsModal({
           setSelectedExpiry(closest?.value || null);
         }
       });
-  }, [roomCode]);
+  }, [roomCode, roomToken, currentUser?.id]);
 
   const handleSetPassword = async (pwd: string | null) => {
     setSavingPassword(true);

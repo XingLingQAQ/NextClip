@@ -20,14 +20,6 @@ import { ClipCard } from "../components/ClipCard";
 import { SettingsModal } from "../components/SettingsModal";
 import { detectType, getDeviceName, formatFileSize, downloadDataUrl } from "../lib/clipUtils";
 
-function generateRoomCode() {
-  const consonants = "bcdfghjklmnpqrstvwxz";
-  const vowels = "aeiou";
-  const digits = "2456789";
-  return [consonants, vowels, consonants, vowels, digits, digits]
-    .map((s) => s[Math.floor(Math.random() * s.length)])
-    .join("");
-}
 
 export default function Home() {
   const { t, lang, setLang } = useT();
@@ -73,6 +65,7 @@ export default function Home() {
   const [roomInput, setRoomInput] = useState(initialRoomInput);
   const [joinError, setJoinError] = useState("");
   const [joining, setJoining] = useState(false);
+  const [generatingRoomCode, setGeneratingRoomCode] = useState(false);
   const [needPassword, setNeedPassword] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
   const [passwordError, setPasswordError] = useState("");
@@ -107,7 +100,7 @@ export default function Home() {
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
+    localStorage.setItem("cloudclip-starred", JSON.stringify(Array.from(starredIds)));
   }, [starredIds]);
 
   useEffect(() => {
@@ -149,6 +142,24 @@ export default function Home() {
     socketRef.current = socket;
   }, []);
 
+  const handleGenerateRoomCode = async () => {
+    setGeneratingRoomCode(true);
+    setJoinError("");
+    try {
+      const res = await fetch("/api/rooms/code", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok || !data.roomCode) {
+        setJoinError(data.message || t("networkError"));
+        return;
+      }
+      setRoomInput(String(data.roomCode).toLowerCase());
+    } catch {
+      setJoinError(t("networkError"));
+    } finally {
+      setGeneratingRoomCode(false);
+    }
+  };
+
   const handleJoinRoom = async () => {
     const code = roomInput.trim();
     if (!code) return;
@@ -159,7 +170,7 @@ export default function Home() {
       const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: currentUser?.id }),
+        body: JSON.stringify({ userId: currentUser?.id, createIfMissing: true }),
       });
 
       const data = await res.json();
@@ -502,18 +513,19 @@ export default function Home() {
                 onKeyDown={(e) => { if (e.key === "Enter") handleJoinRoom(); }}
                 className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl pl-9 pr-20 py-3 text-gray-900 dark:text-white font-mono font-semibold tracking-wider outline-none focus:bg-black/10 dark:focus:bg-white/20 focus:border-blue-400/50 transition-all placeholder-gray-400 placeholder:font-sans placeholder:font-normal placeholder:tracking-normal"
                 placeholder={t("roomCode")}
-                maxLength={12}
+                maxLength={32}
                 data-testid="input-room-code"
               />
               {/* Generate random code button */}
               <button
-                onClick={() => setRoomInput(generateRoomCode())}
+                onClick={handleGenerateRoomCode}
+                disabled={generatingRoomCode}
                 className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-semibold text-gray-500 dark:text-gray-400 hover:text-blue-500 dark:hover:text-blue-400 bg-black/5 dark:bg-white/10 hover:bg-blue-500/10 px-2 py-1 rounded-lg transition-all"
                 title={t("generateRoom")}
                 data-testid="button-generate-room"
               >
                 <Shuffle className="w-3 h-3" />
-                <span>{t("generateRoom")}</span>
+                <span>{generatingRoomCode ? t("joining") : t("generateRoom")}</span>
               </button>
               {showOnboarding && onboardingStep === 0 && (
                 <OnboardingTooltip
