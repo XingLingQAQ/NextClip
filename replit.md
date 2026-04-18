@@ -39,19 +39,20 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 8. **Content truncation**: Long content truncated with line-clamp in cards; full view in modal
 9. **Download support**: Images and files have download buttons (not just copy)
 10. **Search & Filter**: Filter by type (text/link/image/code/file/mixed), favorites, search
-11. **Favorites**: Star clips (stored in localStorage per device)
+11. **Shared pinning**: Pin clips persisted server-side and synchronized to all room members
 12. **Sensitive masking**: Mark clips as sensitive, content hidden until revealed
 13. **Burn after read**: Clips auto-delete after being copied once
 14. **Lock screen**: PIN-based app lock
 15. **Incognito mode**: Visual indicator for privacy-conscious usage
 16. **Dark/Light theme**: Full theme support with glassmorphism design
-17. **User accounts**: Login/register for unlocking permanent room creation
+17. **User accounts**: Session-based login/register via HttpOnly cookie
 18. **Room expiry**: Configurable auto-destroy (1h/24h/7d/30d/permanent). Only logged-in users can set permanent
-19. **Room tokens**: Server issues access tokens on successful join; socket.io validates tokens before sending data
-20. **Room owner enforcement**: Only room creator can change password/expiry settings. Server validates owner_id.
+19. **Room tokens**: Server issues room access tokens on successful join; REST and socket both validate tokens
+20. **Room owner enforcement**: Room management uses server-side session identity + valid room token
 21. **i18n (Chinese/English)**: Full bilingual support. Default language is Chinese. Globe toggle on every screen.
 22. **Interactive onboarding**: Step-by-step tooltips pointing at UI elements (room code input → join button on join screen; compose area → send button → settings button on main app). Skippable, persisted in localStorage.
 23. **PinInput numbers-only**: Room password input accepts only digits (6-digit numeric PIN).
+24. **Custom device identity**: Device name can be edited in Settings and persisted in localStorage for cross-session targeting labels.
 
 ## i18n System
 - File: `client/src/i18n.ts`
@@ -64,9 +65,11 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 ## Database
 - SQLite file: `clipboard.db` (gitignored)
 - Tables:
-  - `users`: id, username, password_hash (SHA-256), created_at
+  - `users`: id, username, password_hash (scrypt + legacy SHA-256 migration), created_at
   - `clips`: id, room_code, content, type, timestamp, source_device, metadata, is_sensitive, burn_after_read, attachments (JSON)
-  - `rooms`: room_code, password_hash (SHA-256, nullable), owner_id, expires_at, created_at
+  - `rooms`: room_code, password_hash (scrypt, nullable), owner_id, expires_at, created_at
+  - `pinned_clips`: room_code, clip_id, created_at
+  - `user_sessions`: sid, expires_at, data
 - Auto-migration on startup for schema changes
 - Expired rooms auto-cleaned on startup + every 60 seconds
 
@@ -76,18 +79,23 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `update-clip` → server broadcasts `clip:update`
 - `delete-clip` → server broadcasts `clip:delete`
 - `clear-room` → server broadcasts `clip:clear`
+- `pin-clip` → server broadcasts `clip:pin` with updated pinned ids
 - `room-users` → online device count updates
+- `room-devices` → online device list updates
 
 ## API Routes
-- `GET /api/rooms/:roomCode` — Check if room exists, returns ownerId, createdAt
-- `POST /api/rooms/:roomCode/join` — Create or join room (sends userId for ownership)
+- `GET /api/rooms/:roomCode` — Room summary + `canManage` capability (minimal fields by default)
+- `POST /api/rooms/:roomCode/join` — Create or join room and return room token
 - `POST /api/rooms/:roomCode/password` — Set/remove room password (owner-only when ownerId set)
 - `POST /api/rooms/:roomCode/expiry` — Set room expiry (owner-only when ownerId set)
+- `POST /api/rooms/:roomCode/clips` — Create clip (room-token protected)
 - `GET /api/rooms/:roomCode/clips` — Get room clips
 - `DELETE /api/rooms/:roomCode/clips/:clipId` — Delete single clip
 - `DELETE /api/rooms/:roomCode/clips` — Clear all room clips
 - `POST /api/auth/register` — Create user account
 - `POST /api/auth/login` — Login and get user info
+- `GET /api/auth/me` — Get current session user
+- `POST /api/auth/logout` — Logout current session
 
 ## Design System
 - Glassmorphism: `glass-panel`, `glass-card`, `glass-input`, `glass-button` utilities

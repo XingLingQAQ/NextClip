@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import type { User } from "@shared/schema";
 import { useT } from "../i18n";
+import { fetchWithCsrf } from "../lib/http";
 
 export default function Auth({ mode }: { mode: "login" | "register" }) {
   const [, navigate] = useLocation();
@@ -42,7 +43,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
 
     try {
       const endpoint = isLogin ? "/api/auth/login" : "/api/auth/register";
-      const res = await fetch(endpoint, {
+      const res = await fetchWithCsrf(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username: username.trim(), password }),
@@ -53,7 +54,6 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
         setLoading(false);
         return;
       }
-      localStorage.setItem("cloudclip-user", JSON.stringify(data.user));
       navigate("/app");
     } catch {
       setError(t("networkError"));

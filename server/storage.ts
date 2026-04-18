@@ -7,6 +7,7 @@ import crypto from "crypto";
 const dbPath = path.resolve(process.cwd(), "clipboard.db");
 const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
+db.pragma("foreign_keys = ON");
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -43,6 +44,14 @@ db.exec(`
 `);
 
 db.exec(`CREATE INDEX IF NOT EXISTS idx_clips_room ON clips(room_code)`);
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pinned_clips (
+    room_code TEXT NOT NULL,
+    clip_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY(room_code, clip_id)
+  )
+`);
 
 function ensureColumn(table: string, col: string, def: string) {
   const info = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
@@ -129,6 +138,7 @@ function cleanExpiredRooms() {
   const now = new Date().toISOString();
   const expired = db.prepare(`SELECT room_code FROM rooms WHERE expires_at IS NOT NULL AND expires_at < ?`).all(now) as Array<{ room_code: string }>;
   for (const r of expired) {
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ?`).run(r.room_code);
     db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(r.room_code);
     db.prepare(`DELETE FROM rooms WHERE room_code = ?`).run(r.room_code);
   }
@@ -247,11 +257,50 @@ export const storage = {
     }));
   },
 
+  getClipsByRoomPage(roomCode: string, beforeTimestamp?: string, limit = 50): Clip[] {
+    const safeLimit = Math.min(Math.max(limit, 1), 200);
+    const rows = beforeTimestamp
+      ? db.prepare(`SELECT * FROM clips WHERE room_code = ? AND timestamp < ? ORDER BY timestamp DESC LIMIT ?`).all(roomCode, beforeTimestamp, safeLimit) as any[]
+      : db.prepare(`SELECT * FROM clips WHERE room_code = ? ORDER BY timestamp DESC LIMIT ?`).all(roomCode, safeLimit) as any[];
+
+    return rows.map((r) => ({
+      id: r.id,
+      roomCode: r.room_code,
+      content: r.content,
+      type: r.type,
+      timestamp: r.timestamp,
+      sourceDevice: r.source_device,
+      metadata: r.metadata || undefined,
+      isSensitive: r.is_sensitive === 1,
+      burnAfterRead: r.burn_after_read === 1,
+      attachments: r.attachments ? JSON.parse(r.attachments) : undefined,
+    }));
+  },
+
+  getPinnedClipIds(roomCode: string): string[] {
+    const rows = db.prepare(`SELECT clip_id FROM pinned_clips WHERE room_code = ? ORDER BY created_at DESC`).all(roomCode) as Array<{ clip_id: string }>;
+    return rows.map((row) => row.clip_id);
+  },
+
+  setClipPinned(roomCode: string, clipId: string, pinned: boolean): boolean {
+    if (pinned) {
+      const exists = db.prepare(`SELECT 1 FROM clips WHERE id = ? AND room_code = ?`).get(clipId, roomCode);
+      if (!exists) return false;
+      db.prepare(`INSERT OR IGNORE INTO pinned_clips (room_code, clip_id, created_at) VALUES (?, ?, ?)`)
+        .run(roomCode, clipId, new Date().toISOString());
+      return true;
+    }
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?`).run(roomCode, clipId);
+    return true;
+  },
+
   deleteClip(id: string, roomCode: string): boolean {
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?`).run(roomCode, id);
     return db.prepare(`DELETE FROM clips WHERE id = ? AND room_code = ?`).run(id, roomCode).changes > 0;
   },
 
   clearRoom(roomCode: string): number {
+    db.prepare(`DELETE FROM pinned_clips WHERE room_code = ?`).run(roomCode);
     return db.prepare(`DELETE FROM clips WHERE room_code = ?`).run(roomCode).changes;
   },
 };

@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "CloudClip Web Clipper",
+  "description": "Clip selected content or page links into a CloudClip room.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "storage", "scripting", "tabs", "contextMenus"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "CloudClip Web Clipper"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

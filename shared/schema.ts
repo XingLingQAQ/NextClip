@@ -19,10 +19,18 @@ export interface Clip {
 }
 
 export interface RoomMessage {
-  type: 'clip:new' | 'clip:delete' | 'clip:clear' | 'clip:history' | 'clip:update';
+  type: 'clip:new' | 'clip:delete' | 'clip:clear' | 'clip:history' | 'clip:update' | 'clip:pin';
   clip?: Clip;
   clipId?: string;
   clips?: Clip[];
+  pinnedClipIds?: string[];
+  pinState?: boolean;
+}
+
+export interface RoomDevice {
+  deviceId: string;
+  deviceName: string;
+  socketId: string;
 }
 
 export interface RoomInfo {

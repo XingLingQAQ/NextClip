@@ -7,25 +7,25 @@ import {
   Shield, Flame,
   LogIn, Hash, Download, Maximize2,
   File, User as UserIcon, Unlock,
-  Users, Smartphone, Shuffle,
+  Users, Smartphone, Shuffle, Crosshair,
 } from "lucide-react";
 
 import { io, Socket } from "socket.io-client";
-import type { Clip, RoomMessage, Attachment, User } from "@shared/schema";
+import type { Clip, RoomMessage, Attachment, User, RoomDevice } from "@shared/schema";
 import { useT } from "../i18n";
 import { PinInput } from "../components/PinInput";
 import { LangToggle } from "../components/LangToggle";
 import { OnboardingTooltip } from "../components/OnboardingTooltip";
 import { ClipCard } from "../components/ClipCard";
 import { SettingsModal } from "../components/SettingsModal";
-import { detectType, getDeviceName, formatFileSize, downloadDataUrl } from "../lib/clipUtils";
+import { detectType, getDeviceName, formatFileSize, downloadDataUrl, normalizeDeviceName, saveDeviceName } from "../lib/clipUtils";
+import { fetchWithCsrf, setCsrfToken } from "../lib/http";
 
 function generateRoomCode() {
-  const consonants = "bcdfghjklmnpqrstvwxz";
-  const vowels = "aeiou";
-  const digits = "2456789";
-  return [consonants, vowels, consonants, vowels, digits, digits]
-    .map((s) => s[Math.floor(Math.random() * s.length)])
+  const chars = "abcdefghjkmnpqrstuvwxyz23456789";
+  const randomValues = crypto.getRandomValues(new Uint32Array(10));
+  return Array.from(randomValues)
+    .map((v) => chars[v % chars.length])
     .join("");
 }
 
@@ -34,6 +34,7 @@ export default function Home() {
 
   const [isLocked, setIsLocked] = useState(false);
   const [lockPin, setLockPin] = useState("");
+  const appLockPinHashRef = useRef(localStorage.getItem("cloudclip-app-lock-pin-hash") || "");
 
   const { savedRoom, initialRoomInput } = (() => {
     const urlRoom = new URLSearchParams(window.location.search).get("room") || "";
@@ -59,10 +60,7 @@ export default function Home() {
     setOnboardingStep((s) => s + 1);
   }, []);
 
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem("cloudclip-user");
-    return saved ? JSON.parse(saved) : null;
-  });
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
   const [isRoomCreator, setIsRoomCreator] = useState<boolean>(() => {
     if (!savedRoom) return false;
@@ -79,14 +77,12 @@ export default function Home() {
   const [pendingRoomCode, setPendingRoomCode] = useState("");
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [roomDevices, setRoomDevices] = useState<RoomDevice[]>([]);
   const socketRef = useRef<Socket | null>(null);
   const roomTokenRef = useRef<string>("");
 
   const [clips, setClips] = useState<Clip[]>([]);
-  const [starredIds, setStarredIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem("cloudclip-starred");
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
+  const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [activeFilter, setActiveFilter] = useState<"all" | "starred" | Clip["type"]>("all");
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -99,16 +95,34 @@ export default function Home() {
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [composeSettings, setComposeSettings] = useState({ sensitive: false, burn: false });
+  const [targetDeviceId, setTargetDeviceId] = useState<string>("all");
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const deviceName = useRef(getDeviceName());
+  const [deviceName, setDeviceName] = useState(getDeviceName());
+  const deviceNameRef = useRef(deviceName);
+  const deviceIdRef = useRef<string>(localStorage.getItem("cloudclip-device-id") || "");
+  if (!deviceIdRef.current) {
+    deviceIdRef.current = crypto.randomUUID();
+    localStorage.setItem("cloudclip-device-id", deviceIdRef.current);
+  }
 
   const [detailClip, setDetailClip] = useState<Clip | null>(null);
   const [detailEditContent, setDetailEditContent] = useState("");
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
-  }, [starredIds]);
+    deviceNameRef.current = deviceName;
+  }, [deviceName]);
+
+  useEffect(() => {
+    fetch("/api/auth/csrf")
+      .then((res) => res.json())
+      .then((data) => {
+        if (typeof data?.csrfToken === "string") {
+          setCsrfToken(data.csrfToken);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!showOnboarding) return;
@@ -132,20 +146,33 @@ export default function Home() {
     const socket = io(window.location.origin, { transports: ["websocket", "polling"], path: "/socket.io" });
     socket.on("connect", () => {
       setIsConnected(true);
-      socket.emit("join-room", { roomCode: code, token: roomTokenRef.current });
+      socket.emit("join-room", {
+        roomCode: code,
+        token: roomTokenRef.current,
+        deviceId: deviceIdRef.current,
+        deviceName: deviceNameRef.current,
+      });
     });
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("room-error", () => { handleLeaveRoom(); });
     socket.on("room-message", (msg: RoomMessage) => {
       switch (msg.type) {
-        case "clip:history": setClips(msg.clips || []); break;
+        case "clip:history":
+          setClips(msg.clips || []);
+          setStarredIds(new Set(msg.pinnedClipIds || []));
+          break;
         case "clip:new": if (msg.clip) setClips((p) => [msg.clip!, ...p]); break;
         case "clip:delete": if (msg.clipId) setClips((p) => p.filter((c) => c.id !== msg.clipId)); break;
         case "clip:clear": setClips([]); break;
         case "clip:update": if (msg.clip) setClips((p) => p.map((c) => c.id === msg.clip!.id ? msg.clip! : c)); break;
+        case "clip:pin":
+          if (!msg.clipId) break;
+          setStarredIds(new Set(msg.pinnedClipIds || []));
+          break;
       }
     });
     socket.on("room-users", (count: number) => setOnlineCount(count));
+    socket.on("room-devices", (devices: RoomDevice[]) => setRoomDevices(devices || []));
     socketRef.current = socket;
   }, []);
 
@@ -156,7 +183,7 @@ export default function Home() {
     setJoinError("");
 
     try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/join`, {
+      const res = await fetchWithCsrf(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({}),
@@ -181,8 +208,7 @@ export default function Home() {
 
       setRoomCode(code);
       localStorage.setItem("cloudclip-room", code);
-      localStorage.removeItem("cloudclip-room-pwd");
-      localStorage.setItem("cloudclip-room-token", data.token);
+      sessionStorage.setItem("cloudclip-room-token", data.token);
       if (data.created) {
         setIsRoomCreator(true);
         localStorage.setItem(`cloudclip-creator-${code}`, "1");
@@ -200,7 +226,7 @@ export default function Home() {
     setJoining(true);
     setPasswordError("");
     try {
-      const res = await fetch(`/api/rooms/${encodeURIComponent(pendingRoomCode)}/join`, {
+      const res = await fetchWithCsrf(`/api/rooms/${encodeURIComponent(pendingRoomCode)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ password: passwordInput }),
@@ -215,8 +241,7 @@ export default function Home() {
       const data = await res.json();
       setRoomCode(pendingRoomCode);
       localStorage.setItem("cloudclip-room", pendingRoomCode);
-      localStorage.setItem("cloudclip-room-pwd", passwordInput);
-      localStorage.setItem("cloudclip-room-token", data.token);
+      sessionStorage.setItem("cloudclip-room-token", data.token);
       setNeedPassword(false);
       setPendingRoomCode("");
       connectSocket(pendingRoomCode, data.token);
@@ -229,20 +254,19 @@ export default function Home() {
 
   useEffect(() => {
     if (roomCode) {
-      const savedPwd = localStorage.getItem("cloudclip-room-pwd") || "";
-      const savedToken = localStorage.getItem("cloudclip-room-token") || "";
+      const savedToken = sessionStorage.getItem("cloudclip-room-token") || "";
       if (savedToken) {
         roomTokenRef.current = savedToken;
         connectSocket(roomCode, savedToken);
       } else {
-        fetch(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
+        fetchWithCsrf(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ password: savedPwd || undefined }),
+          body: JSON.stringify({}),
         }).then(async (res) => {
           if (res.ok) {
             const data = await res.json();
-            localStorage.setItem("cloudclip-room-token", data.token);
+            sessionStorage.setItem("cloudclip-room-token", data.token);
             connectSocket(roomCode, data.token);
           } else {
             const data = await res.json();
@@ -254,14 +278,13 @@ export default function Home() {
             } else {
               setRoomCode("");
               localStorage.removeItem("cloudclip-room");
-              localStorage.removeItem("cloudclip-room-pwd");
             }
           }
         }).catch(() => {});
       }
     }
     return () => { socketRef.current?.disconnect(); };
-  }, []);
+  }, [connectSocket, roomCode]);
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add("dark");
@@ -293,13 +316,15 @@ export default function Home() {
     } else type = detectType(composeText);
 
     socketRef.current.emit("send-clip", {
-      content: composeText.trim(), type, sourceDevice: deviceName.current,
+      content: composeText.trim(), type, sourceDevice: deviceName,
       isSensitive: composeSettings.sensitive, burnAfterRead: composeSettings.burn,
       attachments: composeAttachments.length > 0 ? composeAttachments : undefined,
+      targetDeviceId,
     });
     setComposeText("");
     setComposeAttachments([]);
     setComposeSettings({ sensitive: false, burn: false });
+    setTargetDeviceId("all");
   };
 
   const handleFileSelect = (files: FileList | null) => {
@@ -332,19 +357,80 @@ export default function Home() {
     setClips([]);
     setIsConnected(false);
     setOnlineCount(0);
+    setRoomDevices([]);
     localStorage.removeItem("cloudclip-room");
-    localStorage.removeItem("cloudclip-room-pwd");
-    localStorage.removeItem("cloudclip-room-token");
+    sessionStorage.removeItem("cloudclip-room-token");
     roomTokenRef.current = "";
   };
 
-  const handleToggleStar = (id: string) => {
-    setStarredIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  const hashPin = async (pin: string): Promise<string> => {
+    const bytes = new TextEncoder().encode(pin);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
   };
+
+  const handleLockApp = async () => {
+    if (!appLockPinHashRef.current) {
+      const rawPin = window.prompt("Set a 4-8 digit app PIN");
+      if (!rawPin) return;
+      const pin = rawPin.trim();
+      if (!/^\d{4,8}$/.test(pin)) {
+        alert("PIN must be 4-8 digits");
+        return;
+      }
+      appLockPinHashRef.current = await hashPin(pin);
+      localStorage.setItem("cloudclip-app-lock-pin-hash", appLockPinHashRef.current);
+    }
+    setLockPin("");
+    setIsLocked(true);
+  };
+
+  const handleUnlockApp = async () => {
+    if (!appLockPinHashRef.current) {
+      setIsLocked(false);
+      return;
+    }
+    const current = await hashPin(lockPin);
+    if (current === appLockPinHashRef.current) {
+      setLockPin("");
+      setIsLocked(false);
+      return;
+    }
+    alert(t("incorrectPassword"));
+  };
+
+  const handleToggleStar = (id: string) => {
+    const nextPinned = !starredIds.has(id);
+    socketRef.current?.emit("pin-clip", { clipId: id, pinned: nextPinned });
+  };
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const data = await res.json();
+        return data.user as User;
+      })
+      .then((user) => setCurrentUser(user || null))
+      .catch(() => setCurrentUser(null));
+  }, []);
+
+  useEffect(() => {
+    const onBlurLock = () => {
+      if (appLockPinHashRef.current && roomCode) {
+        setIsLocked(true);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") onBlurLock();
+    };
+    window.addEventListener("blur", onBlurLock);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", onBlurLock);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [roomCode]);
 
   const handleSaveEdit = () => {
     if (!detailClip || !socketRef.current) return;
@@ -372,6 +458,11 @@ export default function Home() {
       : activeFilter === "starred" ? starredIds.has(clip.id)
       : clip.type === activeFilter;
     return matchesSearch && matchesFilter;
+  }).sort((a, b) => {
+    const aPinned = starredIds.has(a.id);
+    const bPinned = starredIds.has(b.id);
+    if (aPinned !== bPinned) return aPinned ? -1 : 1;
+    return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
   });
 
   const onboardHighlight = (step: number) =>
@@ -398,13 +489,13 @@ export default function Home() {
             type="password"
             value={lockPin}
             onChange={(e) => setLockPin(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") setIsLocked(false); }}
+            onKeyDown={(e) => { if (e.key === "Enter") handleUnlockApp(); }}
             className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl px-4 py-3 text-center text-gray-900 dark:text-white tracking-[0.5em] text-xl outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors mb-6"
             placeholder="••••"
             data-testid="input-lock-pin"
           />
           <button
-            onClick={() => setIsLocked(false)}
+            onClick={handleUnlockApp}
             className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors"
             data-testid="button-unlock"
           >
@@ -581,7 +672,14 @@ export default function Home() {
                 </div>
                 <span className="font-medium text-gray-800 dark:text-white text-sm">{currentUser.username}</span>
                 <button
-                  onClick={() => { setCurrentUser(null); localStorage.removeItem("cloudclip-user"); }}
+                  onClick={async () => {
+                    try {
+                      await fetchWithCsrf("/api/auth/logout", { method: "POST" });
+                    } catch {
+                      // ignore network errors on client-side logout
+                    }
+                    setCurrentUser(null);
+                  }}
                   className="text-xs text-gray-400 hover:text-red-400 transition-colors ml-0.5"
                 >
                   ({t("logOut")})
@@ -683,6 +781,13 @@ export default function Home() {
               </div>
             )}
             <div className="flex gap-2">
+              <button
+                onClick={handleLockApp}
+                className="flex-1 flex items-center justify-center py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300 transition-all"
+                title={t("appLockFeature")}
+              >
+                <Lock className="w-4 h-4" />
+              </button>
               <button
                 onClick={() => setIsIncognito(!isIncognito)}
                 className={`flex-1 flex items-center justify-center py-2.5 rounded-xl transition-all ${isIncognito ? "bg-purple-500/20 text-purple-600 dark:text-purple-400" : "bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300"}`}
@@ -821,6 +926,24 @@ export default function Home() {
                   </button>
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="hidden sm:flex items-center gap-1.5">
+                    <Crosshair className="w-3.5 h-3.5 text-gray-400" />
+                    <select
+                      value={targetDeviceId}
+                      onChange={(e) => setTargetDeviceId(e.target.value)}
+                      className="text-xs bg-white/10 border border-white/20 rounded-lg px-2 py-1.5 max-w-[170px]"
+                      title={t("targetedDelivery")}
+                    >
+                      <option value="all">{t("allDevices")}</option>
+                      {roomDevices
+                        .filter((device) => device.deviceId !== deviceIdRef.current)
+                        .map((device) => (
+                          <option key={`${device.deviceId}-${device.socketId}`} value={device.deviceId}>
+                            {device.deviceName}
+                          </option>
+                        ))}
+                    </select>
+                  </div>
                   {!isConnected && (
                     <span className="text-xs text-red-400 flex items-center gap-1 hidden sm:flex">
                       <RefreshCw className="w-3 h-3 animate-spin" /> {t("reconnecting")}
@@ -1159,6 +1282,21 @@ export default function Home() {
             currentUser={currentUser}
             roomToken={roomTokenRef.current}
             isRoomCreator={isRoomCreator}
+            deviceName={deviceName}
+            onDeviceNameSave={(value) => {
+              const normalized = normalizeDeviceName(value);
+              const persisted = saveDeviceName(normalized);
+              const nextDeviceName = persisted || getDeviceName();
+              setDeviceName(nextDeviceName);
+              if (socketRef.current?.connected && roomCode) {
+                socketRef.current.emit("join-room", {
+                  roomCode,
+                  token: roomTokenRef.current,
+                  deviceId: deviceIdRef.current,
+                  deviceName: nextDeviceName,
+                });
+              }
+            }}
             onClose={() => setShowSettings(false)}
             onLeave={() => { handleLeaveRoom(); setShowSettings(false); }}
             lang={lang}

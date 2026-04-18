@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CloudClip Clipper</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <h1>CloudClip Clipper</h1>
+    <label>
+      App URL
+      <input id="appUrl" placeholder="https://your-cloudclip.app" />
+    </label>
+    <label>
+      Room Code
+      <input id="roomCode" placeholder="abc123" />
+    </label>
+    <label>
+      Room Password (optional)
+      <input id="roomPassword" type="password" placeholder="6-digit" />
+    </label>
+    <label>
+      Room Token (optional)
+      <input id="roomToken" placeholder="paste token to skip join request" />
+    </label>
+
+    <div class="actions">
+      <button id="clipSelection">Clip Selection</button>
+      <button id="clipPage">Clip Page Link</button>
+    </div>
+
+    <p id="status" role="status"></p>
+  </main>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
