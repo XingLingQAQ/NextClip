@@ -57,8 +57,72 @@ ensureColumn("clips", "attachments", "TEXT");
 ensureColumn("rooms", "owner_id", "TEXT");
 ensureColumn("rooms", "expires_at", "TEXT");
 
-function hash(s: string): string {
-  return crypto.createHash("sha256").update(s).digest("hex");
+const HASH_ALGO = "scrypt";
+const SCRYPT_N = 1 << 15;
+const SCRYPT_R = 8;
+const SCRYPT_P = 2;
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_SALT_BYTES = 16;
+const SCRYPT_MAXMEM = 128 * 1024 * 1024;
+
+type PasswordVerification = {
+  matched: boolean;
+  needsRehash: boolean;
+};
+
+/**
+ * 新密码参数基线（用于后续统一升级）：
+ * - memory cost: N=32768, r=8（约 32MB 级别内存压力）
+ * - time cost: N=32768（迭代成本）
+ * - parallelism: p=2
+ */
+function hashPassword(plainText: string): string {
+  const salt = crypto.randomBytes(SCRYPT_SALT_BYTES).toString("base64");
+  const derived = crypto.scryptSync(plainText, salt, SCRYPT_KEYLEN, {
+    N: SCRYPT_N,
+    r: SCRYPT_R,
+    p: SCRYPT_P,
+    maxmem: SCRYPT_MAXMEM,
+  }).toString("base64");
+
+  return `${HASH_ALGO}$${SCRYPT_N}$${SCRYPT_R}$${SCRYPT_P}$${salt}$${derived}`;
+}
+
+function verifyPassword(plainText: string, storedHash: string): PasswordVerification {
+  if (storedHash.startsWith(`${HASH_ALGO}$`)) {
+    const parts = storedHash.split("$");
+    if (parts.length !== 6) return { matched: false, needsRehash: false };
+
+    const [, , nRaw, rRaw, pRaw] = parts;
+    const [salt, digest] = [parts[4], parts[5]];
+    const n = Number(nRaw);
+    const r = Number(rRaw);
+    const p = Number(pRaw);
+    if (!salt || !digest || !Number.isFinite(n) || !Number.isFinite(r) || !Number.isFinite(p)) {
+      return { matched: false, needsRehash: false };
+    }
+
+    const derived = crypto.scryptSync(plainText, salt, SCRYPT_KEYLEN, {
+      N: n,
+      r,
+      p,
+      maxmem: SCRYPT_MAXMEM,
+    });
+    const expected = Buffer.from(digest, "base64");
+    if (expected.length !== derived.length) return { matched: false, needsRehash: false };
+
+    return {
+      matched: crypto.timingSafeEqual(derived, expected),
+      needsRehash: n !== SCRYPT_N || r !== SCRYPT_R || p !== SCRYPT_P,
+    };
+  }
+
+  // 兼容历史 SHA-256（64位 hex）并触发渐进迁移
+  const isLegacySha256 = /^[a-f0-9]{64}$/i.test(storedHash);
+  if (!isLegacySha256) return { matched: false, needsRehash: false };
+
+  const legacy = crypto.createHash("sha256").update(plainText).digest("hex");
+  return { matched: storedHash === legacy, needsRehash: storedHash === legacy };
 }
 
 function cleanExpiredRooms() {
@@ -79,7 +143,7 @@ export const storage = {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
     db.prepare(`INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`)
-      .run(id, username, hash(password), createdAt);
+      .run(id, username, hashPassword(password), createdAt);
     return { id, username, createdAt };
   },
 
@@ -91,7 +155,15 @@ export const storage = {
 
   verifyUser(username: string, password: string): User | null {
     const user = this.getUser(username);
-    if (!user || user.passwordHash !== hash(password)) return null;
+    if (!user) return null;
+    const result = verifyPassword(password, user.passwordHash);
+    if (!result.matched) return null;
+
+    if (result.needsRehash) {
+      db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`)
+        .run(hashPassword(password), user.id);
+    }
+
     return { id: user.id, username: user.username, createdAt: user.createdAt };
   },
 
@@ -116,19 +188,27 @@ export const storage = {
 
   createRoom(roomCode: string, ownerId?: string, password?: string, expiresAt?: string): RoomInfo {
     db.prepare(`INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(roomCode, password ? hash(password) : null, ownerId || null, expiresAt || null, new Date().toISOString());
+      .run(roomCode, password ? hashPassword(password) : null, ownerId || null, expiresAt || null, new Date().toISOString());
     return { roomCode, hasPassword: !!password, expiresAt: expiresAt || null, ownerId: ownerId || null };
   },
 
   verifyRoomPassword(roomCode: string, password: string): boolean {
-    const row = db.prepare(`SELECT password_hash FROM rooms WHERE room_code = ?`).get(roomCode) as any;
+    const row = db.prepare(`SELECT room_code, password_hash FROM rooms WHERE room_code = ?`).get(roomCode) as any;
     if (!row || !row.password_hash) return false;
-    return row.password_hash === hash(password);
+    const result = verifyPassword(password, row.password_hash);
+    if (!result.matched) return false;
+
+    if (result.needsRehash) {
+      db.prepare(`UPDATE rooms SET password_hash = ? WHERE room_code = ?`)
+        .run(hashPassword(password), row.room_code);
+    }
+
+    return true;
   },
 
   setRoomPassword(roomCode: string, password: string | null): void {
     db.prepare(`UPDATE rooms SET password_hash = ? WHERE room_code = ?`)
-      .run(password ? hash(password) : null, roomCode);
+      .run(password ? hashPassword(password) : null, roomCode);
   },
 
   setRoomExpiry(roomCode: string, expiresAt: string | null): void {
