@@ -23,14 +23,21 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+const isProduction = process.env.NODE_ENV === "production";
+const sessionSecret = process.env.SESSION_SECRET;
+
+if (isProduction && !sessionSecret) {
+  throw new Error("SESSION_SECRET must be set in production");
+}
+
 const sessionMiddleware = session({
-  secret: process.env.SESSION_SECRET || "cloudclip-dev-session-secret",
+  secret: sessionSecret || "cloudclip-dev-session-secret",
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: isProduction,
     maxAge: 1000 * 60 * 60 * 24 * 7,
   },
 });
