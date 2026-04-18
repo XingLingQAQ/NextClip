@@ -80,6 +80,7 @@ export default function Home() {
   const [roomDevices, setRoomDevices] = useState<RoomDevice[]>([]);
   const socketRef = useRef<Socket | null>(null);
   const roomTokenRef = useRef<string>("");
+  const csrfBootstrapRef = useRef<Promise<void> | null>(null);
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [starredIds, setStarredIds] = useState<Set<string>>(new Set());
@@ -113,16 +114,24 @@ export default function Home() {
     deviceNameRef.current = deviceName;
   }, [deviceName]);
 
-  useEffect(() => {
-    fetch("/api/auth/csrf")
-      .then((res) => res.json())
-      .then((data) => {
-        if (typeof data?.csrfToken === "string") {
-          setCsrfToken(data.csrfToken);
-        }
-      })
-      .catch(() => {});
+  const bootstrapCsrf = useCallback(async () => {
+    if (!csrfBootstrapRef.current) {
+      csrfBootstrapRef.current = fetch("/api/auth/csrf")
+        .then((res) => res.json())
+        .then((data) => {
+          if (typeof data?.csrfToken === "string") {
+            setCsrfToken(data.csrfToken);
+          }
+        })
+        .catch(() => {});
+    }
+
+    await csrfBootstrapRef.current;
   }, []);
+
+  useEffect(() => {
+    void bootstrapCsrf();
+  }, [bootstrapCsrf]);
 
   useEffect(() => {
     if (!showOnboarding) return;
@@ -183,6 +192,7 @@ export default function Home() {
     setJoinError("");
 
     try {
+      await bootstrapCsrf();
       const res = await fetchWithCsrf(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -226,6 +236,7 @@ export default function Home() {
     setJoining(true);
     setPasswordError("");
     try {
+      await bootstrapCsrf();
       const res = await fetchWithCsrf(`/api/rooms/${encodeURIComponent(pendingRoomCode)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -259,32 +270,36 @@ export default function Home() {
         roomTokenRef.current = savedToken;
         connectSocket(roomCode, savedToken);
       } else {
-        fetchWithCsrf(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({}),
-        }).then(async (res) => {
-          if (res.ok) {
-            const data = await res.json();
-            sessionStorage.setItem("cloudclip-room-token", data.token);
-            connectSocket(roomCode, data.token);
-          } else {
-            const data = await res.json();
-            if (data.needPassword) {
-              setPendingRoomCode(roomCode);
-              setNeedPassword(true);
-              setRoomCode("");
-              localStorage.removeItem("cloudclip-room");
+        void (async () => {
+          await bootstrapCsrf();
+
+          fetchWithCsrf(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({}),
+          }).then(async (res) => {
+            if (res.ok) {
+              const data = await res.json();
+              sessionStorage.setItem("cloudclip-room-token", data.token);
+              connectSocket(roomCode, data.token);
             } else {
-              setRoomCode("");
-              localStorage.removeItem("cloudclip-room");
+              const data = await res.json();
+              if (data.needPassword) {
+                setPendingRoomCode(roomCode);
+                setNeedPassword(true);
+                setRoomCode("");
+                localStorage.removeItem("cloudclip-room");
+              } else {
+                setRoomCode("");
+                localStorage.removeItem("cloudclip-room");
+              }
             }
-          }
-        }).catch(() => {});
+          }).catch(() => {});
+        })();
       }
     }
     return () => { socketRef.current?.disconnect(); };
-  }, [connectSocket, roomCode]);
+  }, [bootstrapCsrf, connectSocket, roomCode]);
 
   useEffect(() => {
     if (isDarkMode) document.documentElement.classList.add("dark");

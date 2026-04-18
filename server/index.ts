@@ -102,8 +102,14 @@ declare module "express-session" {
   }
 }
 
+const sessionSecret = process.env.SESSION_SECRET || process.env.AUTH_SIGNING_SECRET;
+
+if (!sessionSecret) {
+  throw new Error("Missing session secret. Set SESSION_SECRET or AUTH_SIGNING_SECRET before startup.");
+}
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || process.env.AUTH_SIGNING_SECRET || "dev-session-secret",
+  secret: sessionSecret,
   resave: false,
   saveUninitialized: false,
   cookie: {
