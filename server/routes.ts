@@ -33,6 +33,13 @@ function getRoomTokenFromRequest(req: Request): string | null {
   return null;
 }
 
+function getIdempotencyKey(req: Request): string | null {
+  const headerKey = req.header("x-idempotency-key");
+  if (headerKey && headerKey.trim()) return headerKey.trim().slice(0, 120);
+  const bodyKey = typeof req.body?.idempotencyKey === "string" ? req.body.idempotencyKey.trim() : "";
+  return bodyKey ? bodyKey.slice(0, 120) : null;
+}
+
 function parseCookies(cookieHeader?: string): Record<string, string> {
   if (!cookieHeader) return {};
   return cookieHeader.split(";").reduce<Record<string, string>>((acc, part) => {
@@ -198,7 +205,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     next();
   });
   app.use(requireCsrfForSessionMutations);
-  setInterval(cleanExpiredRoomTokens, 60 * 1000);
+  setInterval(cleanExpiredRoomTokens, 60 * 1000).unref();
 
   const allowedOrigins = (process.env.ALLOWED_ORIGINS || "")
     .split(",")
@@ -353,12 +360,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       return res.status(400).json({ message: "Invalid clip payload" });
     }
     const { content, sourceDevice, metadata, attachments, isSensitive, burnAfterRead, type } = parsed.data;
+    const idempotencyKey = getIdempotencyKey(req);
 
     if (!content && (!attachments || attachments.length === 0)) {
       return res.status(400).json({ message: "Clip content or attachments required" });
     }
 
-    const clip = storage.createClip(roomCode, content.trim(), type, sourceDevice.trim(), metadata, isSensitive, burnAfterRead, attachments);
+    const clip = storage.createClip(roomCode, content.trim(), type, sourceDevice.trim(), metadata, isSensitive, burnAfterRead, attachments, idempotencyKey || undefined);
+    storage.addAuditEvent(roomCode, "clip:create", clip.id, req.currentUser?.id, undefined, {
+      via: "rest",
+      idempotencyKey: idempotencyKey || undefined,
+      hasAttachments: !!attachments?.length,
+    });
     io.to(roomCode).emit("room-message", { type: "clip:new", clip } as RoomMessage);
     res.json({ success: true, clip });
   });
@@ -383,6 +396,25 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     });
   });
 
+  app.get("/api/rooms/:roomCode/clips/since/:timestamp", (req, res) => {
+    const roomCode = String(req.params.roomCode);
+    const since = String(req.params.timestamp || "");
+    const token = getRoomTokenFromRequest(req);
+    if (!token || !validateRoomToken(roomCode, token)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+    if (!storage.roomExists(roomCode)) {
+      return res.status(404).json({ message: "Room not found" });
+    }
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : 200;
+    const clips = storage.getClipsSince(roomCode, since, limit);
+    return res.json({
+      clips,
+      serverTime: new Date().toISOString(),
+      nextCursor: clips.length ? clips[clips.length - 1].timestamp : since,
+    });
+  });
+
   app.delete("/api/rooms/:roomCode/clips/:clipId", (req, res) => {
     const roomCode = String(req.params.roomCode);
     const token = getRoomTokenFromRequest(req);
@@ -394,6 +426,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     }
     const deleted = storage.deleteClip(req.params.clipId, req.params.roomCode);
     if (!deleted) return res.status(404).json({ message: "Clip not found" });
+    storage.addAuditEvent(roomCode, "clip:delete", req.params.clipId, req.currentUser?.id);
     res.json({ success: true });
   });
 
@@ -406,7 +439,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!storage.roomExists(roomCode)) {
       return res.status(404).json({ message: "Room not found" });
     }
-    res.json({ success: true, deleted: storage.clearRoom(roomCode) });
+    const deleted = storage.clearRoom(roomCode);
+    storage.addAuditEvent(roomCode, "clip:clear", undefined, req.currentUser?.id, undefined, { deleted });
+    res.json({ success: true, deleted });
+  });
+
+  app.post("/api/rooms/:roomCode/clips/:clipId/restore", (req, res) => {
+    const roomCode = String(req.params.roomCode);
+    const token = getRoomTokenFromRequest(req);
+    if (!token || !validateRoomToken(roomCode, token)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+    if (!storage.roomExists(roomCode)) {
+      return res.status(404).json({ message: "Room not found" });
+    }
+    const restored = storage.restoreClip(req.params.clipId, roomCode);
+    if (!restored) return res.status(404).json({ message: "Clip not found or not deleted" });
+    storage.addAuditEvent(roomCode, "clip:restore", req.params.clipId, req.currentUser?.id);
+    const clip = storage.getClipsByRoom(roomCode).find((c) => c.id === req.params.clipId);
+    if (clip) {
+      io.to(roomCode).emit("room-message", { type: "clip:new", clip } as RoomMessage);
+    }
+    res.json({ success: true });
+  });
+
+  app.get("/api/rooms/:roomCode/audit", requireAuth, (req, res) => {
+    const roomCode = String(req.params.roomCode);
+    const token = getRoomTokenFromRequest(req);
+    if (!token || !validateRoomToken(roomCode, token)) {
+      return res.status(403).json({ message: "Unauthorized" });
+    }
+    if (!storage.roomExists(roomCode)) {
+      return res.status(404).json({ message: "Room not found" });
+    }
+    const limit = typeof req.query.limit === "string" ? Number(req.query.limit) : 100;
+    res.json({ events: storage.getAuditEvents(roomCode, limit) });
   });
 
   app.post("/api/rooms/:roomCode/pins/:clipId", (req, res) => {
@@ -462,6 +529,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       }
       const clip = storage.createClip(currentRoom, data.content, data.type, data.sourceDevice,
         data.metadata, data.isSensitive, data.burnAfterRead, data.attachments);
+      const actorDeviceId = roomDeviceState.get(currentRoom)?.get(socket.id)?.deviceId;
+      storage.addAuditEvent(currentRoom, "clip:create", clip.id, undefined, actorDeviceId, {
+        via: "socket",
+        targeted: !!(data?.targetDeviceId && data.targetDeviceId !== "all"),
+      });
 
       const targetDeviceId = typeof data?.targetDeviceId === "string" ? data.targetDeviceId : "";
       if (!targetDeviceId || targetDeviceId === "all") {
@@ -482,6 +554,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("update-clip", (data: { clipId: string; content: string; type: string }) => {
       if (!currentRoom) return;
       if (storage.updateClip(data.clipId, currentRoom, data.content, data.type)) {
+        const actorDeviceId = roomDeviceState.get(currentRoom)?.get(socket.id)?.deviceId;
+        storage.addAuditEvent(currentRoom, "clip:update", data.clipId, undefined, actorDeviceId);
         const clip = storage.getClipsByRoom(currentRoom).find((c) => c.id === data.clipId);
         if (clip) io.to(currentRoom).emit("room-message", { type: "clip:update", clip } as RoomMessage);
       }
@@ -490,6 +564,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("delete-clip", (clipId: string) => {
       if (!currentRoom) return;
       if (storage.deleteClip(clipId, currentRoom)) {
+        const actorDeviceId = roomDeviceState.get(currentRoom)?.get(socket.id)?.deviceId;
+        storage.addAuditEvent(currentRoom, "clip:delete", clipId, undefined, actorDeviceId);
         io.to(currentRoom).emit("room-message", { type: "clip:delete", clipId } as RoomMessage);
       }
     });
@@ -497,6 +573,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     socket.on("clear-room", () => {
       if (!currentRoom) return;
       storage.clearRoom(currentRoom);
+      const actorDeviceId = roomDeviceState.get(currentRoom)?.get(socket.id)?.deviceId;
+      storage.addAuditEvent(currentRoom, "clip:clear", undefined, undefined, actorDeviceId);
       io.to(currentRoom).emit("room-message", { type: "clip:clear" } as RoomMessage);
     });
 
@@ -505,6 +583,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       if (!payload?.clipId) return;
       const success = storage.setClipPinned(currentRoom, payload.clipId, !!payload.pinned);
       if (!success) return;
+      const actorDeviceId = roomDeviceState.get(currentRoom)?.get(socket.id)?.deviceId;
+      storage.addAuditEvent(currentRoom, payload.pinned ? "clip:pin" : "clip:unpin", payload.clipId, undefined, actorDeviceId);
       io.to(currentRoom).emit("room-message", {
         type: "clip:pin",
         clipId: payload.clipId,

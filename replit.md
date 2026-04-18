@@ -56,6 +56,10 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 23. **PinInput numbers-only**: Room password input accepts only digits (6-digit numeric PIN).
 24. **Custom device identity**: Device name can be edited in Settings and persisted in localStorage for cross-session targeting labels.
 25. **Security headers baseline**: Server sets CSP and common browser hardening headers in production.
+26. **Soft delete + restore**: Clip delete/clear performs soft-delete and supports restore API.
+27. **Audit trail**: Server writes room audit events for create/update/delete/clear/pin operations.
+28. **Idempotent clip creation**: Optional idempotency key support for REST clip create to prevent duplicates.
+29. **Incremental sync endpoint**: Server supports `since`-timestamp incremental clip fetch.
 
 ## i18n System
 - File: `client/src/i18n.ts`
@@ -93,8 +97,11 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 - `POST /api/rooms/:roomCode/expiry` — Set room expiry (owner-only when ownerId set)
 - `POST /api/rooms/:roomCode/clips` — Create clip (room-token protected)
 - `GET /api/rooms/:roomCode/clips` — Get room clips
+- `GET /api/rooms/:roomCode/clips/since/:timestamp` — Incremental sync since timestamp
 - `DELETE /api/rooms/:roomCode/clips/:clipId` — Delete single clip
 - `DELETE /api/rooms/:roomCode/clips` — Clear all room clips
+- `POST /api/rooms/:roomCode/clips/:clipId/restore` — Restore soft-deleted clip
+- `GET /api/rooms/:roomCode/audit` — Query audit events (auth + room-token)
 - `POST /api/auth/register` — Create user account
 - `POST /api/auth/login` — Login and get user info
 - `GET /api/auth/me` — Get current session user
