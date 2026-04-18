@@ -159,7 +159,7 @@ export default function Home() {
       const res = await fetch(`/api/rooms/${encodeURIComponent(code)}/join`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: currentUser?.id }),
+        body: JSON.stringify({}),
       });
 
       const data = await res.json();

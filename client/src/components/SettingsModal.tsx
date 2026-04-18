@@ -51,9 +51,7 @@ export function SettingsModal({
   const [expiresAt, setExpiresAt] = useState<string | null>(null);
   const [selectedExpiry, setSelectedExpiry] = useState<string | null>(null);
   const [savingExpiry, setSavingExpiry] = useState(false);
-  const [ownerId, setOwnerId] = useState<string | null>(null);
-
-  const isOwner = isRoomCreator || (!!currentUser && !!ownerId && currentUser.id === ownerId);
+  const [isOwner, setIsOwner] = useState<boolean>(isRoomCreator);
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`)
@@ -61,7 +59,7 @@ export function SettingsModal({
       .then((data) => {
         setHasPassword(data.hasPassword || false);
         setExpiresAt(data.expiresAt || null);
-        setOwnerId(data.ownerId || null);
+        setIsOwner(!!data.isOwner || isRoomCreator);
         if (!data.expiresAt) {
           setSelectedExpiry("permanent");
         } else {
@@ -92,7 +90,6 @@ export function SettingsModal({
       body: JSON.stringify({
         password: pwd,
         token: roomToken,
-        userId: currentUser?.id,
       }),
     });
     setHasPassword(!!pwd);
@@ -110,7 +107,6 @@ export function SettingsModal({
         body: JSON.stringify({
           expiryHours: hours,
           token: roomToken,
-          userId: currentUser?.id,
         }),
       }
     );
