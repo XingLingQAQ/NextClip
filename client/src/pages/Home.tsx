@@ -81,6 +81,7 @@ export default function Home() {
   const [onlineCount, setOnlineCount] = useState(0);
   const socketRef = useRef<Socket | null>(null);
   const roomTokenRef = useRef<string>("");
+  const roomSessionRef = useRef<string>("");
 
   const [clips, setClips] = useState<Clip[]>([]);
   const [starredIds, setStarredIds] = useState<Set<string>>(() => {
@@ -107,7 +108,7 @@ export default function Home() {
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
 
   useEffect(() => {
-    localStorage.setItem("cloudclip-starred", JSON.stringify([...starredIds]));
+    localStorage.setItem("cloudclip-starred", JSON.stringify(Array.from(starredIds)));
   }, [starredIds]);
 
   useEffect(() => {
@@ -126,13 +127,14 @@ export default function Home() {
     }
   }, [roomCode, showOnboarding, onboardingStep]);
 
-  const connectSocket = useCallback((code: string, token?: string) => {
+  const connectSocket = useCallback((code: string, token?: string, sessionId?: string) => {
     if (token) roomTokenRef.current = token;
+    if (sessionId) roomSessionRef.current = sessionId;
     if (socketRef.current) socketRef.current.disconnect();
     const socket = io(window.location.origin, { transports: ["websocket", "polling"], path: "/socket.io" });
     socket.on("connect", () => {
       setIsConnected(true);
-      socket.emit("join-room", { roomCode: code, token: roomTokenRef.current });
+      socket.emit("join-room", { roomCode: code, token: roomTokenRef.current, sessionId: roomSessionRef.current });
     });
     socket.on("disconnect", () => setIsConnected(false));
     socket.on("room-error", () => { handleLeaveRoom(); });
@@ -183,11 +185,12 @@ export default function Home() {
       localStorage.setItem("cloudclip-room", code);
       localStorage.removeItem("cloudclip-room-pwd");
       localStorage.setItem("cloudclip-room-token", data.token);
+      localStorage.setItem("cloudclip-room-session", data.sessionId);
       if (data.created) {
         setIsRoomCreator(true);
         localStorage.setItem(`cloudclip-creator-${code}`, "1");
       }
-      connectSocket(code, data.token);
+      connectSocket(code, data.token, data.sessionId);
       if (showOnboarding && onboardingStep < 2) setOnboardingStep(2);
     } catch {
       setJoinError(t("networkError"));
@@ -217,9 +220,10 @@ export default function Home() {
       localStorage.setItem("cloudclip-room", pendingRoomCode);
       localStorage.setItem("cloudclip-room-pwd", passwordInput);
       localStorage.setItem("cloudclip-room-token", data.token);
+      localStorage.setItem("cloudclip-room-session", data.sessionId);
       setNeedPassword(false);
       setPendingRoomCode("");
-      connectSocket(pendingRoomCode, data.token);
+      connectSocket(pendingRoomCode, data.token, data.sessionId);
       if (showOnboarding && onboardingStep < 2) setOnboardingStep(2);
     } catch {
       setPasswordError(t("networkError"));
@@ -231,9 +235,11 @@ export default function Home() {
     if (roomCode) {
       const savedPwd = localStorage.getItem("cloudclip-room-pwd") || "";
       const savedToken = localStorage.getItem("cloudclip-room-token") || "";
-      if (savedToken) {
+      const savedSession = localStorage.getItem("cloudclip-room-session") || "";
+      if (savedToken && savedSession) {
         roomTokenRef.current = savedToken;
-        connectSocket(roomCode, savedToken);
+        roomSessionRef.current = savedSession;
+        connectSocket(roomCode, savedToken, savedSession);
       } else {
         fetch(`/api/rooms/${encodeURIComponent(roomCode)}/join`, {
           method: "POST",
@@ -243,7 +249,8 @@ export default function Home() {
           if (res.ok) {
             const data = await res.json();
             localStorage.setItem("cloudclip-room-token", data.token);
-            connectSocket(roomCode, data.token);
+            localStorage.setItem("cloudclip-room-session", data.sessionId);
+            connectSocket(roomCode, data.token, data.sessionId);
           } else {
             const data = await res.json();
             if (data.needPassword) {
@@ -255,6 +262,7 @@ export default function Home() {
               setRoomCode("");
               localStorage.removeItem("cloudclip-room");
               localStorage.removeItem("cloudclip-room-pwd");
+              localStorage.removeItem("cloudclip-room-session");
             }
           }
         }).catch(() => {});
@@ -335,7 +343,9 @@ export default function Home() {
     localStorage.removeItem("cloudclip-room");
     localStorage.removeItem("cloudclip-room-pwd");
     localStorage.removeItem("cloudclip-room-token");
+    localStorage.removeItem("cloudclip-room-session");
     roomTokenRef.current = "";
+    roomSessionRef.current = "";
   };
 
   const handleToggleStar = (id: string) => {
