@@ -1,4 +1,5 @@
 import express, { type Request, Response, NextFunction } from "express";
+import { randomUUID } from "crypto";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
@@ -6,10 +7,58 @@ import { createServer } from "http";
 const app = express();
 const httpServer = createServer(app);
 
+const DEBUG_LOG_ENABLED = process.env.LOG_DEBUG === "true";
+
+const MASKED_VALUE = "[REDACTED]";
+const SENSITIVE_FIELD_RULES: RegExp[] = [
+  /token/i,
+  /password/i,
+  /^clip(content)?$/i,
+  /attachmentmetadata/i,
+  /^attachment$/i,
+  /^attachments$/i,
+];
+
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;
+    requestId?: string;
   }
+}
+
+function shouldMaskField(fieldName: string): boolean {
+  const normalizedFieldName = fieldName.replace(/[\s_.-]/g, "");
+  return SENSITIVE_FIELD_RULES.some((rule) => rule.test(normalizedFieldName));
+}
+
+function sanitizeForLogging(value: unknown, keyPath = ""): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      sanitizeForLogging(item, keyPath ? `${keyPath}[${index}]` : `${index}`),
+    );
+  }
+
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).reduce(
+      (acc, [key, nestedValue]) => {
+        const nextPath = keyPath ? `${keyPath}.${key}` : key;
+        if (shouldMaskField(key) || shouldMaskField(nextPath)) {
+          acc[key] = MASKED_VALUE;
+          return acc;
+        }
+
+        acc[key] = sanitizeForLogging(nestedValue, nextPath);
+        return acc;
+      },
+      {} as Record<string, unknown>,
+    );
+  }
+
+  return value;
 }
 
 app.use(
@@ -34,25 +83,54 @@ export function log(message: string, source = "express") {
 }
 
 app.use((req, res, next) => {
+  req.requestId = (req.headers["x-request-id"] as string | undefined) || randomUUID();
+  res.setHeader("x-request-id", req.requestId);
+
+  next();
+});
+
+app.use((req, res, next) => {
   const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+  const route = req.path;
+  let errorCode: string | undefined;
 
   const originalResJson = res.json;
   res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
+    if (bodyJson && typeof bodyJson === "object") {
+      const responseBody = bodyJson as Record<string, unknown>;
+      const code = responseBody["error-code"] ?? responseBody.errorCode ?? responseBody.code;
+      if (typeof code === "string") {
+        errorCode = code;
+      }
+    }
+
     return originalResJson.apply(res, [bodyJson, ...args]);
   };
 
   res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
+    if (!route.startsWith("/api")) {
+      return;
+    }
 
-      log(logLine);
+    const latency = Date.now() - start;
+    const summary = {
+      route,
+      status: res.statusCode,
+      latency: `${latency}ms`,
+      "request-id": req.requestId,
+      "error-code": errorCode ?? "-",
+    };
+
+    log(JSON.stringify(summary));
+
+    if (DEBUG_LOG_ENABLED) {
+      const debugPayload = {
+        method: req.method,
+        query: sanitizeForLogging(req.query),
+        params: sanitizeForLogging(req.params),
+        body: sanitizeForLogging(req.body),
+      };
+      log(JSON.stringify(debugPayload), "express-debug");
     }
   });
 
