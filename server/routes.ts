@@ -1,13 +1,111 @@
-import type { Express } from "express";
+import type { Express, Request, RequestHandler } from "express";
 import type { Server } from "http";
 import { Server as SocketIOServer } from "socket.io";
 import { storage } from "./storage";
-import type { RoomMessage } from "@shared/schema";
+import type { RoomMessage, User } from "@shared/schema";
 import crypto from "crypto";
 
 const VALID_EXPIRY = new Set(["1", "24", "168", "720", "permanent"]);
+const AUTH_COOKIE_NAME = "session";
+const AUTH_SIGNING_SECRET = process.env.AUTH_SIGNING_SECRET || "dev-auth-secret-change-me";
 
 const roomTokens = new Map<string, Set<string>>();
+
+declare global {
+  namespace Express {
+    interface Request {
+      currentUser?: User;
+    }
+  }
+}
+
+function base64UrlEncode(input: string): string {
+  return Buffer.from(input)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
+function base64UrlDecode(input: string): string {
+  const normalized = input.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = normalized + "=".repeat((4 - (normalized.length % 4 || 4)) % 4);
+  return Buffer.from(padded, "base64").toString("utf8");
+}
+
+function signHmac(value: string): string {
+  return crypto.createHmac("sha256", AUTH_SIGNING_SECRET).update(value).digest("base64url");
+}
+
+function issueAuthToken(user: User): string {
+  const payload = base64UrlEncode(JSON.stringify({
+    sub: user.id,
+    username: user.username,
+    iat: Date.now(),
+  }));
+  const signature = signHmac(payload);
+  return `${payload}.${signature}`;
+}
+
+function readUserFromToken(token: string): User | null {
+  const [payload, signature] = token.split(".");
+  if (!payload || !signature) return null;
+  if (signHmac(payload) !== signature) return null;
+  try {
+    const parsed = JSON.parse(base64UrlDecode(payload)) as { sub?: string };
+    if (!parsed.sub) return null;
+    return storage.getUserById(parsed.sub);
+  } catch {
+    return null;
+  }
+}
+
+function parseCookies(cookieHeader?: string): Record<string, string> {
+  if (!cookieHeader) return {};
+  return cookieHeader.split(";").reduce<Record<string, string>>((acc, part) => {
+    const [rawKey, ...rawValue] = part.trim().split("=");
+    if (!rawKey) return acc;
+    acc[rawKey] = decodeURIComponent(rawValue.join("=") || "");
+    return acc;
+  }, {});
+}
+
+function getBearerToken(req: Request): string | null {
+  const authHeader = req.headers.authorization;
+  if (!authHeader) return null;
+  if (!authHeader.startsWith("Bearer ")) return null;
+  return authHeader.slice("Bearer ".length).trim() || null;
+}
+
+/** API contract: identity must come from server-verified token/session only (HttpOnly cookie or Bearer token), never from body/query params. */
+const requireAuth: RequestHandler = (req, res, next) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[AUTH_COOKIE_NAME] || getBearerToken(req);
+  if (!token) return res.status(401).json({ message: "Unauthorized" });
+  const user = readUserFromToken(token);
+  if (!user) return res.status(401).json({ message: "Unauthorized" });
+  req.currentUser = user;
+  next();
+};
+
+const attachCurrentUser: RequestHandler = (req, _res, next) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const token = cookies[AUTH_COOKIE_NAME] || getBearerToken(req);
+  if (token) {
+    const user = readUserFromToken(token);
+    if (user) req.currentUser = user;
+  }
+  next();
+};
+
+function assertRoomOwner(roomCode: string, userId: string): { ok: true; room: NonNullable<ReturnType<typeof storage.getRoom>> } | { ok: false; status: number; message: string } {
+  const room = storage.getRoom(roomCode);
+  if (!room) return { ok: false, status: 404, message: "Room not found" };
+  if (!room.ownerId || room.ownerId !== userId) {
+    return { ok: false, status: 403, message: "Only the room owner can perform this action" };
+  }
+  return { ok: true, room };
+}
 
 function issueRoomToken(roomCode: string): string {
   const token = crypto.randomUUID();
@@ -21,6 +119,8 @@ function validateRoomToken(roomCode: string, token: string): boolean {
 }
 
 export async function registerRoutes(httpServer: Server, app: Express): Promise<Server> {
+  app.use("/api", attachCurrentUser);
+
   const io = new SocketIOServer(httpServer, {
     cors: { origin: "*" },
     path: "/socket.io",
@@ -35,6 +135,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     const existing = storage.getUser(username.trim());
     if (existing) return res.status(409).json({ message: "Username already taken" });
     const user = storage.createUser(username.trim(), password);
+    const token = issueAuthToken(user);
+    res.cookie(AUTH_COOKIE_NAME, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
     res.json({ success: true, user });
   });
 
@@ -43,6 +145,8 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     if (!username || !password) return res.status(400).json({ message: "Username and password required" });
     const user = storage.verifyUser(username.trim(), password);
     if (!user) return res.status(401).json({ message: "Invalid credentials" });
+    const token = issueAuthToken(user);
+    res.cookie(AUTH_COOKIE_NAME, token, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/" });
     res.json({ success: true, user });
   });
 
@@ -54,20 +158,19 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       hasPassword: room.hasPassword,
       expiresAt: room.expiresAt,
       createdAt: room.createdAt,
-      ownerId: room.ownerId,
+      isOwner: !!req.currentUser?.id && room.ownerId === req.currentUser.id,
     });
   });
 
   app.post("/api/rooms/:roomCode/join", (req, res) => {
-    const { roomCode } = req.params;
-    const { password, userId } = req.body;
+    const roomCode = String(req.params.roomCode);
+    const password = typeof req.body?.password === "string" ? req.body.password : undefined;
     const room = storage.getRoom(roomCode);
 
     if (!room) {
       let expiresAt: string | null = null;
       expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
-      const verifiedUserId = userId ? (storage.getUserById(userId) ? userId : null) : null;
-      storage.createRoom(roomCode, verifiedUserId || undefined, undefined, expiresAt);
+      storage.createRoom(roomCode, req.currentUser?.id, undefined, expiresAt);
       const token = issueRoomToken(roomCode);
       return res.json({ success: true, created: true, hasPassword: false, token });
     }
@@ -83,19 +186,18 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true, created: false, hasPassword: room.hasPassword, expiresAt: room.expiresAt, token });
   });
 
-  app.post("/api/rooms/:roomCode/password", (req, res) => {
-    const { roomCode } = req.params;
-    const { password, token, userId } = req.body;
+  app.post("/api/rooms/:roomCode/password", requireAuth, (req, res) => {
+    const roomCode = String(req.params.roomCode);
+    const password = typeof req.body?.password === "string" ? req.body.password : null;
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const currentUser = req.currentUser!;
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    const room = storage.getRoom(roomCode);
-    if (!room) return res.status(404).json({ message: "Room not found" });
-    if (room.ownerId && room.ownerId !== userId) {
-      return res.status(403).json({ message: "Only the room owner can change the password" });
-    }
+    const ownerCheck = assertRoomOwner(roomCode, currentUser.id);
+    if (!ownerCheck.ok) return res.status(ownerCheck.status).json({ message: ownerCheck.message });
     if (password) {
-      if (typeof password !== "string" || password.length !== 6 || !/^\d{6}$/.test(password)) {
+      if (password.length !== 6 || !/^\d{6}$/.test(password)) {
         return res.status(400).json({ message: "Password must be exactly 6 digits" });
       }
     }
@@ -103,25 +205,21 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
     res.json({ success: true });
   });
 
-  app.post("/api/rooms/:roomCode/expiry", (req, res) => {
-    const { roomCode } = req.params;
-    const { expiryHours, token, userId } = req.body;
+  app.post("/api/rooms/:roomCode/expiry", requireAuth, (req, res) => {
+    const roomCode = String(req.params.roomCode);
+    const expiryHours = typeof req.body?.expiryHours === "string" ? req.body.expiryHours : String(req.body?.expiryHours || "");
+    const token = typeof req.body?.token === "string" ? req.body.token : "";
+    const currentUser = req.currentUser!;
     if (!validateRoomToken(roomCode, token)) {
       return res.status(403).json({ message: "Unauthorized" });
     }
-    const room = storage.getRoom(roomCode);
-    if (!room) return res.status(404).json({ message: "Room not found" });
-    if (room.ownerId && room.ownerId !== userId) {
-      return res.status(403).json({ message: "Only the room owner can change the expiry" });
-    }
+    const ownerCheck = assertRoomOwner(roomCode, currentUser.id);
+    if (!ownerCheck.ok) return res.status(ownerCheck.status).json({ message: ownerCheck.message });
     if (!VALID_EXPIRY.has(String(expiryHours))) {
       return res.status(400).json({ message: "Invalid expiry value" });
     }
     let expiresAt: string | null = null;
     if (expiryHours === "permanent") {
-      if (!userId || !storage.getUserById(userId)) {
-        return res.status(403).json({ message: "Login required for permanent rooms" });
-      }
       expiresAt = null;
     } else {
       expiresAt = new Date(Date.now() + parseInt(String(expiryHours)) * 3600000).toISOString();
