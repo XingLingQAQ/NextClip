@@ -46,7 +46,7 @@ Real-time cross-platform web clipboard app with Apple Fluid Glass (Glassmorphism
 12. **Sensitive masking**: Mark clips as sensitive, content hidden until revealed
 13. **Burn after read**: Clips auto-delete after being copied once
 14. **Lock screen**: PIN-based app lock
-15. **Incognito mode**: Visual indicator for privacy-conscious usage
+15. **Incognito mode**: Hides all clip history from view when active; compose still works
 16. **Dark/Light theme**: Full theme support with glassmorphism design
 17. **User accounts**: Session-based login/register via HttpOnly cookie
 18. **Room expiry**: Configurable auto-destroy (1h/24h/7d/30d/permanent). Only logged-in users can set permanent

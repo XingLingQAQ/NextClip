@@ -148,6 +148,17 @@ const en = {
   copy: "Copy",
   copyCode: "Copy code",
   codeCopied: "Copied!",
+  codes: "Code",
+  incognitoActive: "Incognito — clips hidden from view",
+  recentlyDeleted: "Recently Deleted",
+  restore: "Restore",
+  noDeleted: "No recently deleted clips",
+  notificationsOn: "Notifications on",
+  notificationsOff: "Enable notifications",
+  auditLog: "Activity Log",
+  auditLogLoginRequired: "Log in to view activity logs",
+  noAuditEvents: "No activity yet",
+  deletedClipsCount: "deleted clips",
 }
 
 const zh: typeof en = {
@@ -300,6 +311,17 @@ const zh: typeof en = {
   copy: "复制",
   copyCode: "复制房间号",
   codeCopied: "已复制！",
+  codes: "代码",
+  incognitoActive: "无痕模式 — 内容已从视图隐藏",
+  recentlyDeleted: "最近删除",
+  restore: "恢复",
+  noDeleted: "没有最近删除的内容",
+  notificationsOn: "通知已开启",
+  notificationsOff: "开启通知",
+  auditLog: "操作日志",
+  auditLogLoginRequired: "登录后可查看操作日志",
+  noAuditEvents: "暂无操作记录",
+  deletedClipsCount: "条已删除",
 };
 
 export type Lang = "en" | "zh";

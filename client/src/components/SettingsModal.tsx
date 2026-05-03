@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Settings, X, Hash, Users, Shield, Unlock, Lock,
-  RefreshCw, Timer, LogOut, QrCode,
+  RefreshCw, Timer, LogOut, QrCode, ScrollText, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import type { Clip, User } from "@shared/schema";
@@ -58,6 +58,20 @@ export function SettingsModal({
   const [savingExpiry, setSavingExpiry] = useState(false);
   const [isOwner, setIsOwner] = useState<boolean>(isRoomCreator);
   const [editingDeviceName, setEditingDeviceName] = useState(deviceName);
+  const [auditEvents, setAuditEvents] = useState<Array<{ action: string; clipId?: string; userId?: number; meta?: Record<string, unknown>; createdAt: string }>>([]);
+  const [showAudit, setShowAudit] = useState(false);
+
+  useEffect(() => {
+    if (currentUser && roomToken) {
+      fetch(`/api/rooms/${encodeURIComponent(roomCode)}/audit`, {
+        headers: { "x-room-token": roomToken },
+        credentials: "include",
+      })
+        .then((r) => r.ok ? r.json() : null)
+        .then((data) => { if (data?.events) setAuditEvents(data.events); })
+        .catch(() => {});
+    }
+  }, [roomCode, roomToken, currentUser]);
 
   useEffect(() => {
     fetch(`/api/rooms/${encodeURIComponent(roomCode)}`)
@@ -368,6 +382,50 @@ export function SettingsModal({
                 </div>
               </div>
             </div>
+          </section>
+
+          <section>
+            <button
+              onClick={() => setShowAudit((v) => !v)}
+              className="w-full flex items-center justify-between text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3 hover:text-gray-700 dark:hover:text-gray-200 transition-colors"
+            >
+              <span className="flex items-center gap-2">
+                <ScrollText className="w-4 h-4" /> {t("auditLog")}
+              </span>
+              {showAudit ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+            </button>
+            <AnimatePresence>
+              {showAudit && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0 }}
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="glass-card rounded-2xl p-4 max-h-64 overflow-y-auto space-y-2">
+                    {!currentUser ? (
+                      <p className="text-xs text-gray-400 italic text-center py-4">{t("auditLogLoginRequired")}</p>
+                    ) : auditEvents.length === 0 ? (
+                      <p className="text-xs text-gray-400 italic text-center py-4">{t("noAuditEvents")}</p>
+                    ) : (
+                      auditEvents.map((ev, i) => (
+                        <div key={i} className="flex items-start justify-between gap-2 py-1.5 border-b border-white/10 last:border-0">
+                          <div className="flex-1 min-w-0">
+                            <span className="text-xs font-mono bg-white/10 dark:bg-white/5 px-1.5 py-0.5 rounded text-blue-500 dark:text-blue-400">
+                              {ev.action}
+                            </span>
+                            {ev.clipId && (
+                              <span className="text-[10px] text-gray-400 ml-1.5 font-mono truncate">#{ev.clipId.slice(0, 8)}</span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-gray-500 flex-shrink-0">{new Date(ev.createdAt).toLocaleTimeString()}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </section>
 
           <button

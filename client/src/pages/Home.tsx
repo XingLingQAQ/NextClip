@@ -4,10 +4,11 @@ import {
   Plus, Search, Settings, Star, Clock,
   Scissors, Lock, Moon, Sun, Ghost, Send, X,
   RefreshCw, ClipboardPaste, FileText, Link2, Image as ImageIcon,
-  Shield, Flame,
+  Shield, Flame, Code,
   LogIn, Hash, Download, Maximize2,
   File, User as UserIcon, Unlock,
   Users, Smartphone, Shuffle, Crosshair,
+  Bell, BellOff, Trash2, RotateCcw,
 } from "lucide-react";
 
 import { io, Socket } from "socket.io-client";
@@ -91,6 +92,10 @@ export default function Home() {
   const [isDarkMode, setIsDarkMode] = useState(false);
   const [isIncognito, setIsIncognito] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [deletedClips, setDeletedClips] = useState<Clip[]>([]);
+  const [notifPerm, setNotifPerm] = useState<NotificationPermission>("default");
+  const [showTrash, setShowTrash] = useState(false);
+  const clipsRef = useRef<Clip[]>([]);
 
   const [composeText, setComposeText] = useState("");
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
@@ -113,6 +118,17 @@ export default function Home() {
   useEffect(() => {
     deviceNameRef.current = deviceName;
   }, [deviceName]);
+
+  useEffect(() => { clipsRef.current = clips; }, [clips]);
+
+  useEffect(() => {
+    if (!roomCode || !("Notification" in window)) return;
+    if (Notification.permission !== "default") {
+      setNotifPerm(Notification.permission);
+    } else {
+      Notification.requestPermission().then((p) => setNotifPerm(p));
+    }
+  }, [roomCode]);
 
   const bootstrapCsrf = useCallback(async () => {
     if (!csrfBootstrapRef.current) {
@@ -170,8 +186,35 @@ export default function Home() {
           setClips(msg.clips || []);
           setStarredIds(new Set(msg.pinnedClipIds || []));
           break;
-        case "clip:new": if (msg.clip) setClips((p) => [msg.clip!, ...p]); break;
-        case "clip:delete": if (msg.clipId) setClips((p) => p.filter((c) => c.id !== msg.clipId)); break;
+        case "clip:new":
+          if (msg.clip) {
+            setClips((p) => [msg.clip!, ...p]);
+            if (
+              msg.clip.sourceDevice !== deviceNameRef.current &&
+              document.visibilityState === "hidden" &&
+              !msg.clip.isSensitive &&
+              !msg.clip.burnAfterRead &&
+              "Notification" in window &&
+              Notification.permission === "granted"
+            ) {
+              new Notification(`CloudClip · ${msg.clip.sourceDevice}`, {
+                body: msg.clip.type === "image" ? "[Image]" : msg.clip.content.slice(0, 100),
+                icon: "/favicon.ico",
+                tag: "cloudclip-new",
+                renotify: true,
+              });
+            }
+          }
+          break;
+        case "clip:delete":
+          if (msg.clipId) {
+            const toDelete = clipsRef.current.find((c) => c.id === msg.clipId);
+            if (toDelete && !toDelete.burnAfterRead) {
+              setDeletedClips((d) => [toDelete, ...d].slice(0, 30));
+            }
+            setClips((p) => p.filter((c) => c.id !== msg.clipId));
+          }
+          break;
         case "clip:clear": setClips([]); break;
         case "clip:update": if (msg.clip) setClips((p) => p.map((c) => c.id === msg.clip!.id ? msg.clip! : c)); break;
         case "clip:pin":
@@ -362,6 +405,27 @@ export default function Home() {
 
   const handleDelete = (id: string) => socketRef.current?.emit("delete-clip", id);
   const handleClearAll = () => socketRef.current?.emit("clear-room");
+
+  const handleRestore = async (clip: Clip) => {
+    const res = await fetchWithCsrf(
+      `/api/rooms/${encodeURIComponent(roomCode)}/clips/${clip.id}/restore`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-room-token": roomTokenRef.current },
+        body: JSON.stringify({}),
+      }
+    );
+    if (res.ok) setDeletedClips((d) => d.filter((c) => c.id !== clip.id));
+  };
+
+  const handleToggleNotifications = () => {
+    if (!("Notification" in window)) return;
+    if (Notification.permission === "granted") {
+      setNotifPerm("denied");
+      return;
+    }
+    Notification.requestPermission().then((p) => setNotifPerm(p));
+  };
 
   const handleLeaveRoom = () => {
     socketRef.current?.disconnect();
@@ -728,6 +792,7 @@ export default function Home() {
     { key: "image", icon: <ImageIcon className="w-4 h-4" />, label: t("images") },
     { key: "file", icon: <File className="w-4 h-4" />, label: t("files") },
     { key: "mixed", icon: <Scissors className="w-4 h-4" />, label: t("mixed") },
+    { key: "code", icon: <Code className="w-4 h-4" />, label: t("codes") },
   ];
 
   return (
@@ -786,6 +851,7 @@ export default function Home() {
             <NavItem icon={<ImageIcon />} label={t("images")} active={activeFilter === "image"} onClick={() => setActiveFilter("image")} count={clips.filter((c) => c.type === "image").length} />
             <NavItem icon={<File />} label={t("files")} active={activeFilter === "file"} onClick={() => setActiveFilter("file")} count={clips.filter((c) => c.type === "file").length} />
             <NavItem icon={<Scissors />} label={t("mixed")} active={activeFilter === "mixed"} onClick={() => setActiveFilter("mixed")} count={clips.filter((c) => c.type === "mixed").length} />
+            <NavItem icon={<Code />} label={t("codes")} active={activeFilter === "code"} onClick={() => setActiveFilter("code")} count={clips.filter((c) => c.type === "code").length} />
           </nav>
 
           <div className="hidden md:block mt-4 pt-4 space-y-2 border-t border-white/20 md:mt-auto">
@@ -817,7 +883,24 @@ export default function Home() {
               >
                 {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
+              <button
+                onClick={handleToggleNotifications}
+                className={`flex-1 flex items-center justify-center py-2.5 rounded-xl transition-all ${notifPerm === "granted" ? "bg-green-500/20 text-green-600 dark:text-green-400" : "bg-white/10 hover:bg-white/20 text-gray-600 dark:text-gray-300"}`}
+                title={notifPerm === "granted" ? t("notificationsOn") : t("notificationsOff")}
+              >
+                {notifPerm === "granted" ? <Bell className="w-4 h-4" /> : <BellOff className="w-4 h-4" />}
+              </button>
             </div>
+            {deletedClips.length > 0 && (
+              <button
+                onClick={() => setShowTrash(true)}
+                className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs text-red-400 hover:bg-red-500/10 transition-colors"
+                data-testid="button-open-trash"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                {deletedClips.length} {t("deletedClipsCount")}
+              </button>
+            )}
             <div
               className={`relative transition-all duration-300 ${onboardHighlight(4)}`}
               data-testid="onboard-target-settings"
@@ -1031,37 +1114,47 @@ export default function Home() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-5 pt-2">
-            <motion.div
-              layout
-              className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-5"
-            >
-              <AnimatePresence mode="popLayout">
-                {filteredClips.map((clip) => (
-                  <ClipCard
-                    key={clip.id}
-                    clip={clip}
-                    isStarred={starredIds.has(clip.id)}
-                    onCopy={(burn) => handleCopy(clip.id, clip.content, burn)}
-                    onDelete={() => handleDelete(clip.id)}
-                    onToggleStar={() => handleToggleStar(clip.id)}
-                    onOpenDetail={() => { setDetailClip(clip); setDetailEditContent(clip.content); }}
-                    onPreviewAttachment={(att) => setPreviewAttachment(att)}
-                    isCopied={copiedId === clip.id}
-                    t={t}
-                  />
-                ))}
-              </AnimatePresence>
-            </motion.div>
-            {filteredClips.length === 0 && (
-              <div className="h-[40vh] flex flex-col items-center justify-center text-center opacity-50">
-                <Search className="w-12 h-12 mb-4" />
-                <p className="text-lg font-medium">
-                  {clips.length === 0 ? t("noClips") : t("noClipsFound")}
-                </p>
-                <p className="text-sm">
-                  {clips.length === 0 ? t("sendToStart") : t("tryDifferent")}
-                </p>
+            {isIncognito ? (
+              <div className="h-[50vh] flex flex-col items-center justify-center text-center">
+                <Ghost className="w-14 h-14 mb-4 text-purple-400 opacity-60" />
+                <p className="text-base font-semibold text-purple-500 dark:text-purple-400">{t("incognitoActive")}</p>
+                <p className="text-xs mt-2 text-gray-500 dark:text-gray-400 max-w-xs">{t("incognitoDesc")}</p>
               </div>
+            ) : (
+              <>
+                <motion.div
+                  layout
+                  className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-5"
+                >
+                  <AnimatePresence mode="popLayout">
+                    {filteredClips.map((clip) => (
+                      <ClipCard
+                        key={clip.id}
+                        clip={clip}
+                        isStarred={starredIds.has(clip.id)}
+                        onCopy={(burn) => handleCopy(clip.id, clip.content, burn)}
+                        onDelete={() => handleDelete(clip.id)}
+                        onToggleStar={() => handleToggleStar(clip.id)}
+                        onOpenDetail={() => { setDetailClip(clip); setDetailEditContent(clip.content); }}
+                        onPreviewAttachment={(att) => setPreviewAttachment(att)}
+                        isCopied={copiedId === clip.id}
+                        t={t}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+                {filteredClips.length === 0 && (
+                  <div className="h-[40vh] flex flex-col items-center justify-center text-center opacity-50">
+                    <Search className="w-12 h-12 mb-4" />
+                    <p className="text-lg font-medium">
+                      {clips.length === 0 ? t("noClips") : t("noClipsFound")}
+                    </p>
+                    <p className="text-sm">
+                      {clips.length === 0 ? t("sendToStart") : t("tryDifferent")}
+                    </p>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1132,6 +1225,60 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* ===== Trash / Restore Modal ===== */}
+      <AnimatePresence>
+        {showTrash && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-end md:items-center justify-center p-0 md:p-4 bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowTrash(false); }}
+          >
+            <motion.div
+              initial={{ y: "100%" }}
+              animate={{ y: 0 }}
+              exit={{ y: "100%" }}
+              transition={{ type: "spring", damping: 25, stiffness: 200 }}
+              className="bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl border border-white/20 w-full max-w-2xl rounded-t-3xl md:rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[80vh]"
+            >
+              <div className="p-5 border-b border-white/10 flex justify-between items-center">
+                <h2 className="text-lg font-bold flex items-center gap-2">
+                  <Trash2 className="w-5 h-5 text-red-400" /> {t("recentlyDeleted")}
+                </h2>
+                <button onClick={() => setShowTrash(false)} className="p-2 rounded-full hover:bg-white/20 transition-colors">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="overflow-y-auto flex-1 p-4 space-y-2">
+                {deletedClips.length === 0 ? (
+                  <div className="h-40 flex flex-col items-center justify-center text-center opacity-50">
+                    <Trash2 className="w-8 h-8 mb-2" />
+                    <p className="text-sm">{t("noDeleted")}</p>
+                  </div>
+                ) : (
+                  deletedClips.map((clip) => (
+                    <div key={clip.id} className="flex items-center gap-3 p-3 rounded-xl glass-card">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs text-gray-500 mb-0.5">{clip.sourceDevice} · {new Date(clip.timestamp).toLocaleString()}</p>
+                        <p className="text-sm truncate opacity-70">{clip.content || `[${clip.type}]`}</p>
+                      </div>
+                      <button
+                        onClick={() => handleRestore(clip)}
+                        className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20 px-3 py-1.5 rounded-lg transition-colors flex-shrink-0"
+                        data-testid={`button-restore-${clip.id}`}
+                      >
+                        <RotateCcw className="w-3 h-3" /> {t("restore")}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ===== Detail / Edit Modal ===== */}
       <AnimatePresence>
