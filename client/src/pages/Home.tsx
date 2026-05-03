@@ -8,7 +8,7 @@ import {
   LogIn, Hash, Download, Maximize2,
   File, User as UserIcon, Unlock,
   Users, Smartphone, Shuffle, Crosshair,
-  Bell, BellOff, Trash2, RotateCcw,
+  Bell, BellOff, Trash2, RotateCcw, Keyboard,
 } from "lucide-react";
 
 import { io, Socket } from "socket.io-client";
@@ -119,6 +119,9 @@ export default function Home() {
   const [detailClip, setDetailClip] = useState<Clip | null>(null);
   const [detailEditContent, setDetailEditContent] = useState("");
   const [previewAttachment, setPreviewAttachment] = useState<Attachment | null>(null);
+  const [showShortcutsHelp, setShowShortcutsHelp] = useState(false);
+
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     deviceNameRef.current = deviceName;
@@ -164,6 +167,34 @@ export default function Home() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [showOnboarding, finishOnboarding, advanceOnboarding]);
+
+  useEffect(() => {
+    if (!roomCode) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (previewAttachment) { setPreviewAttachment(null); return; }
+        if (detailClip) { setDetailClip(null); return; }
+        if (showClearConfirm) { setShowClearConfirm(false); return; }
+        if (showPinSetup) { setShowPinSetup(false); return; }
+        if (showTrash) { setShowTrash(false); return; }
+        if (showSettings) { setShowSettings(false); return; }
+        if (showShortcutsHelp) { setShowShortcutsHelp(false); return; }
+      }
+      if (e.key === "?" && !e.ctrlKey && !e.metaKey) {
+        const active = document.activeElement;
+        const isInput = active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA");
+        if (!isInput) { setShowShortcutsHelp((v) => !v); return; }
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [roomCode, previewAttachment, detailClip, showClearConfirm, showPinSetup, showTrash, showSettings, showShortcutsHelp]);
 
   useEffect(() => {
     if (roomCode && showOnboarding && onboardingStep < 2) {
@@ -1138,6 +1169,7 @@ export default function Home() {
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
                 <input
+                  ref={searchInputRef}
                   type="text"
                   placeholder={t("searchHistory")}
                   value={searchQuery}
@@ -1152,6 +1184,14 @@ export default function Home() {
                 data-testid="button-clear-all"
               >
                 {t("clearAll")}
+              </button>
+              <button
+                onClick={() => setShowShortcutsHelp(true)}
+                className="p-2 rounded-lg text-gray-400 hover:bg-white/20 hover:text-gray-600 dark:hover:text-gray-200 transition-colors flex-shrink-0"
+                title="Keyboard shortcuts (?)"
+                data-testid="button-shortcuts-help"
+              >
+                <Keyboard className="w-4 h-4" />
               </button>
             </div>
           )}
@@ -1610,6 +1650,67 @@ export default function Home() {
             lang={lang}
             setLang={setLang}
           />
+        )}
+      </AnimatePresence>
+
+      {/* ===== Keyboard Shortcuts Help Modal ===== */}
+      <AnimatePresence>
+        {showShortcutsHelp && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[80] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+            onClick={() => setShowShortcutsHelp(false)}
+            data-testid="modal-shortcuts"
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-panel p-6 rounded-3xl w-full max-w-sm shadow-2xl border border-white/20"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-2">
+                  <Keyboard className="w-5 h-5 text-blue-500" />
+                  <h2 className="text-lg font-bold text-gray-900 dark:text-white">Keyboard Shortcuts</h2>
+                </div>
+                <button
+                  onClick={() => setShowShortcutsHelp(false)}
+                  className="p-1.5 rounded-full hover:bg-white/20 transition-colors"
+                  data-testid="button-shortcuts-close"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="space-y-2">
+                {(() => {
+                  const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+                  return [
+                    { keys: ["Esc"], desc: "Close any open modal" },
+                    { keys: isMac ? ["⌘", "Enter"] : ["Ctrl", "Enter"], desc: "Send compose message" },
+                    { keys: isMac ? ["⌘", "K"] : ["Ctrl", "K"], desc: "Focus search" },
+                    { keys: ["?"], desc: "Toggle this help panel" },
+                  ].map(({ keys, desc }) => (
+                    <div key={desc} className="flex items-center justify-between py-2 border-b border-white/10 last:border-0">
+                      <span className="text-sm text-gray-600 dark:text-gray-300">{desc}</span>
+                      <div className="flex items-center gap-1">
+                        {keys.map((k) => (
+                          <kbd
+                            key={k}
+                            className="px-2 py-0.5 rounded-md bg-black/10 dark:bg-white/10 border border-black/10 dark:border-white/20 text-xs font-mono font-semibold text-gray-700 dark:text-gray-200"
+                          >
+                            {k}
+                          </kbd>
+                        ))}
+                      </div>
+                    </div>
+                  ));
+                })()}
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
