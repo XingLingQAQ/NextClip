@@ -46,6 +46,23 @@ export function formatFileSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 }
 
+export function formatRelativeTime(timestamp: string): string {
+  const lang = (localStorage.getItem("cloudclip-lang") as string) || "zh";
+  const diffMs = Date.now() - new Date(timestamp).getTime();
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return lang === "zh" ? "刚刚" : "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return lang === "zh" ? `${diffMin}分钟前` : `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return lang === "zh" ? `${diffHr}小时前` : `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return lang === "zh" ? `${diffDay}天前` : `${diffDay}d ago`;
+  return new Date(timestamp).toLocaleDateString(lang === "zh" ? "zh-CN" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 export function downloadDataUrl(dataUrl: string, fileName: string) {
   const a = document.createElement("a");
   a.href = dataUrl;

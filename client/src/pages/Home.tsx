@@ -35,6 +35,11 @@ export default function Home() {
 
   const [isLocked, setIsLocked] = useState(false);
   const [lockPin, setLockPin] = useState("");
+  const [lockError, setLockError] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showPinSetup, setShowPinSetup] = useState(false);
+  const [pinSetupValue, setPinSetupValue] = useState("");
+  const [pinSetupError, setPinSetupError] = useState("");
   const appLockPinHashRef = useRef(localStorage.getItem("cloudclip-app-lock-pin-hash") || "");
 
   const { savedRoom, initialRoomInput } = (() => {
@@ -123,10 +128,11 @@ export default function Home() {
 
   useEffect(() => {
     if (!roomCode || !("Notification" in window)) return;
-    if (Notification.permission !== "default") {
-      setNotifPerm(Notification.permission);
+    if (Notification.permission === "granted") {
+      const enabled = localStorage.getItem("cloudclip-notif-enabled");
+      setNotifPerm(enabled === "0" ? "default" : "granted");
     } else {
-      Notification.requestPermission().then((p) => setNotifPerm(p));
+      setNotifPerm(Notification.permission);
     }
   }, [roomCode]);
 
@@ -404,7 +410,8 @@ export default function Home() {
   };
 
   const handleDelete = (id: string) => socketRef.current?.emit("delete-clip", id);
-  const handleClearAll = () => socketRef.current?.emit("clear-room");
+  const doClearAll = () => { socketRef.current?.emit("clear-room"); setShowClearConfirm(false); };
+  const handleClearAll = () => { if (clips.length > 0) setShowClearConfirm(true); };
 
   const handleRestore = async (clip: Clip) => {
     const res = await fetchWithCsrf(
@@ -415,16 +422,31 @@ export default function Home() {
         body: JSON.stringify({}),
       }
     );
-    if (res.ok) setDeletedClips((d) => d.filter((c) => c.id !== clip.id));
+    if (res.ok) {
+      setDeletedClips((d) => {
+        const next = d.filter((c) => c.id !== clip.id);
+        if (next.length === 0) setShowTrash(false);
+        return next;
+      });
+    }
   };
 
   const handleToggleNotifications = () => {
     if (!("Notification" in window)) return;
-    if (Notification.permission === "granted") {
-      setNotifPerm("denied");
+    if (Notification.permission === "denied") {
+      alert(t("notificationsBlocked"));
       return;
     }
-    Notification.requestPermission().then((p) => setNotifPerm(p));
+    if (Notification.permission === "granted") {
+      const next = notifPerm === "granted" ? "default" : "granted";
+      setNotifPerm(next as NotificationPermission);
+      localStorage.setItem("cloudclip-notif-enabled", next === "granted" ? "1" : "0");
+      return;
+    }
+    Notification.requestPermission().then((p) => {
+      setNotifPerm(p);
+      if (p === "granted") localStorage.setItem("cloudclip-notif-enabled", "1");
+    });
   };
 
   const handleLeaveRoom = () => {
@@ -434,6 +456,7 @@ export default function Home() {
     setRoomCode("");
     setIsRoomCreator(false);
     setClips([]);
+    setDeletedClips([]);
     setIsConnected(false);
     setOnlineCount(0);
     setRoomDevices([]);
@@ -448,19 +471,31 @@ export default function Home() {
     return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
   };
 
-  const handleLockApp = async () => {
+  const handleLockApp = () => {
     if (!appLockPinHashRef.current) {
-      const rawPin = window.prompt("Set a 4-8 digit app PIN");
-      if (!rawPin) return;
-      const pin = rawPin.trim();
-      if (!/^\d{4,8}$/.test(pin)) {
-        alert("PIN must be 4-8 digits");
-        return;
-      }
-      appLockPinHashRef.current = await hashPin(pin);
-      localStorage.setItem("cloudclip-app-lock-pin-hash", appLockPinHashRef.current);
+      setPinSetupValue("");
+      setPinSetupError("");
+      setShowPinSetup(true);
+      return;
     }
     setLockPin("");
+    setLockError(false);
+    setIsLocked(true);
+  };
+
+  const handleConfirmPinSetup = async () => {
+    const pin = pinSetupValue.trim();
+    if (!/^\d{4,8}$/.test(pin)) {
+      setPinSetupError(t("pinSetupError"));
+      return;
+    }
+    appLockPinHashRef.current = await hashPin(pin);
+    localStorage.setItem("cloudclip-app-lock-pin-hash", appLockPinHashRef.current);
+    setShowPinSetup(false);
+    setPinSetupValue("");
+    setPinSetupError("");
+    setLockPin("");
+    setLockError(false);
     setIsLocked(true);
   };
 
@@ -472,10 +507,12 @@ export default function Home() {
     const current = await hashPin(lockPin);
     if (current === appLockPinHashRef.current) {
       setLockPin("");
+      setLockError(false);
       setIsLocked(false);
       return;
     }
-    alert(t("incorrectPassword"));
+    setLockPin("");
+    setLockError(true);
   };
 
   const handleToggleStar = (id: string) => {
@@ -567,12 +604,16 @@ export default function Home() {
           <input
             type="password"
             value={lockPin}
-            onChange={(e) => setLockPin(e.target.value)}
+            onChange={(e) => { setLockPin(e.target.value); setLockError(false); }}
             onKeyDown={(e) => { if (e.key === "Enter") handleUnlockApp(); }}
-            className="w-full bg-black/5 dark:bg-white/10 border border-black/10 dark:border-white/20 rounded-xl px-4 py-3 text-center text-gray-900 dark:text-white tracking-[0.5em] text-xl outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors mb-6"
+            className={`w-full bg-black/5 dark:bg-white/10 border rounded-xl px-4 py-3 text-center text-gray-900 dark:text-white tracking-[0.5em] text-xl outline-none focus:bg-black/10 dark:focus:bg-white/20 transition-colors mb-2 ${lockError ? "border-red-500 bg-red-500/10" : "border-black/10 dark:border-white/20"}`}
             placeholder="••••"
             data-testid="input-lock-pin"
           />
+          {lockError && (
+            <p className="text-red-400 text-sm text-center mb-4">{t("lockError")}</p>
+          )}
+          {!lockError && <div className="mb-4" />}
           <button
             onClick={handleUnlockApp}
             className="w-full py-3 rounded-xl bg-white text-black font-semibold shadow-lg hover:bg-gray-100 transition-colors"
@@ -1092,26 +1133,28 @@ export default function Home() {
             </div>
           </header>
 
-          <div className="px-3 sm:px-5 py-2 flex items-center gap-3 flex-shrink-0">
-            <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
-              <input
-                type="text"
-                placeholder={t("searchHistory")}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-9 pr-4 py-2 rounded-xl glass-input text-sm text-gray-800 dark:text-white placeholder-gray-500 outline-none"
-                data-testid="input-search"
-              />
+          {!isIncognito && (
+            <div className="px-3 sm:px-5 py-2 flex items-center gap-3 flex-shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" />
+                <input
+                  type="text"
+                  placeholder={t("searchHistory")}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full pl-9 pr-4 py-2 rounded-xl glass-input text-sm text-gray-800 dark:text-white placeholder-gray-500 outline-none"
+                  data-testid="input-search"
+                />
+              </div>
+              <button
+                onClick={handleClearAll}
+                className="text-xs font-medium text-red-500 hover:bg-red-500/10 px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
+                data-testid="button-clear-all"
+              >
+                {t("clearAll")}
+              </button>
             </div>
-            <button
-              onClick={handleClearAll}
-              className="text-xs font-medium text-red-500 hover:bg-red-500/10 px-3 py-2 rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
-              data-testid="button-clear-all"
-            >
-              {t("clearAll")}
-            </button>
-          </div>
+          )}
 
           <div className="flex-1 overflow-y-auto p-3 sm:p-5 pt-2">
             {isIncognito ? (
@@ -1373,6 +1416,109 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== PIN Setup Modal ===== */}
+      <AnimatePresence>
+        {showPinSetup && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+            onClick={() => setShowPinSetup(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-panel p-8 rounded-3xl w-full max-w-sm shadow-2xl border border-white/20 flex flex-col items-center"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-14 h-14 rounded-full bg-blue-500/20 flex items-center justify-center mb-5">
+                <Lock className="w-7 h-7 text-blue-500" />
+              </div>
+              <h2 className="text-xl font-bold mb-1 text-gray-900 dark:text-white">{t("pinSetupTitle")}</h2>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6 text-center">4–8 digits</p>
+              <input
+                autoFocus
+                type="password"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                maxLength={8}
+                value={pinSetupValue}
+                onChange={(e) => { setPinSetupValue(e.target.value.replace(/\D/g, "")); setPinSetupError(""); }}
+                onKeyDown={(e) => { if (e.key === "Enter") handleConfirmPinSetup(); }}
+                placeholder={t("pinSetupPlaceholder")}
+                className={`w-full text-center tracking-[0.4em] text-xl px-4 py-3 rounded-xl glass-input text-gray-900 dark:text-white outline-none mb-2 ${pinSetupError ? "border border-red-500" : ""}`}
+                data-testid="input-pin-setup"
+              />
+              {pinSetupError && <p className="text-red-400 text-sm mb-3">{pinSetupError}</p>}
+              {!pinSetupError && <div className="mb-3" />}
+              <div className="flex gap-3 w-full mt-1">
+                <button
+                  onClick={() => setShowPinSetup(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-white/20 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-white/10 transition-colors"
+                  data-testid="button-pin-cancel"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  onClick={handleConfirmPinSetup}
+                  className="flex-1 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold transition-colors"
+                  data-testid="button-pin-confirm"
+                >
+                  {t("pinSetupConfirm")}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ===== Clear All Confirmation ===== */}
+      <AnimatePresence>
+        {showClearConfirm && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-black/60 backdrop-blur-md"
+            onClick={() => setShowClearConfirm(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="glass-panel p-7 rounded-3xl w-full max-w-sm shadow-2xl border border-white/20"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                  <Trash2 className="w-5 h-5 text-red-500" />
+                </div>
+                <h2 className="text-lg font-bold text-gray-900 dark:text-white">{t("confirmClearAll")}</h2>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">{t("confirmClearAllDesc")}</p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 py-2.5 rounded-xl border border-white/20 text-sm font-medium text-gray-600 dark:text-gray-300 hover:bg-white/10 transition-colors"
+                  data-testid="button-clear-cancel"
+                >
+                  {t("cancel")}
+                </button>
+                <button
+                  onClick={doClearAll}
+                  className="flex-1 py-2.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors"
+                  data-testid="button-clear-confirm"
+                >
+                  {t("clearAll")}
+                </button>
               </div>
             </motion.div>
           </motion.div>

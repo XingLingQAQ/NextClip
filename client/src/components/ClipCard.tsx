@@ -6,7 +6,7 @@ import {
   Eye, EyeOff, Download, Smartphone,
 } from "lucide-react";
 import type { Clip, Attachment } from "@shared/schema";
-import { formatFileSize, downloadDataUrl, getDeviceName } from "../lib/clipUtils";
+import { formatFileSize, downloadDataUrl, getDeviceName, formatRelativeTime } from "../lib/clipUtils";
 
 export function ClipCard({
   clip,
@@ -42,12 +42,7 @@ export function ClipCard({
     }
   };
 
-  const formattedTime = new Date(clip.timestamp).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const formattedTime = formatRelativeTime(clip.timestamp);
 
   const currentDevice = getDeviceName();
   const isCurrentDevice = clip.sourceDevice === currentDevice;

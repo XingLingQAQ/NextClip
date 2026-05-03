@@ -159,6 +159,15 @@ const en = {
   auditLogLoginRequired: "Log in to view activity logs",
   noAuditEvents: "No activity yet",
   deletedClipsCount: "deleted clips",
+  confirmClearAll: "Clear All Clips?",
+  confirmClearAllDesc: "This will permanently remove all clips from this room for every device. This cannot be undone.",
+  pinSetupTitle: "Set App Lock PIN",
+  pinSetupPlaceholder: "Enter 4–8 digit PIN",
+  pinSetupConfirm: "Set PIN & Lock",
+  pinSetupError: "PIN must be 4–8 digits",
+  notificationsBlocked: "Notifications blocked — change in browser settings",
+  cancel: "Cancel",
+  lockError: "Incorrect PIN, try again",
 }
 
 const zh: typeof en = {
@@ -322,6 +331,15 @@ const zh: typeof en = {
   auditLogLoginRequired: "登录后可查看操作日志",
   noAuditEvents: "暂无操作记录",
   deletedClipsCount: "条已删除",
+  confirmClearAll: "确认清空全部？",
+  confirmClearAllDesc: "将删除此房间所有内容，对所有设备生效，且无法撤销。",
+  pinSetupTitle: "设置应用锁 PIN",
+  pinSetupPlaceholder: "输入 4–8 位数字",
+  pinSetupConfirm: "设置并锁定",
+  pinSetupError: "PIN 需为 4–8 位数字",
+  notificationsBlocked: "通知已被浏览器屏蔽，请在浏览器设置中开启",
+  cancel: "取消",
+  lockError: "PIN 错误，请重试",
 };
 
 export type Lang = "en" | "zh";
