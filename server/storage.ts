@@ -446,6 +446,16 @@ export const storage = {
     );
   },
 
+  /** Consume a burn-after-read clip: marks it as deleted and returns true if it was BAR */
+  consumeBurnAfterRead(clipId: string, roomCode: string): boolean {
+    const row = db.prepare(`SELECT burn_after_read FROM clips WHERE id = ? AND room_code = ? AND deleted_at IS NULL`).get(clipId, roomCode) as any;
+    if (!row || row.burn_after_read !== 1) return false;
+    const now = new Date().toISOString();
+    db.prepare(`UPDATE clips SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE id = ? AND room_code = ?`)
+      .run(now, now, clipId, roomCode);
+    return true;
+  },
+
   getAuditEvents(roomCode: string, limit = 100): Array<{
     id: string;
     roomCode: string;
