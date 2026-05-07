@@ -5,7 +5,7 @@ import {
   Lock, LogIn, UserPlus, User as UserIcon,
   RefreshCw, ArrowLeft, Globe
 } from "lucide-react";
-import type { User } from "@shared/schema";
+import type { User } from "../lib/types";
 import { useT } from "../i18n";
 import { fetchWithCsrf } from "../lib/http";
 

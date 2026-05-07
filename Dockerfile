@@ -1,23 +1,15 @@
-FROM node:20-alpine AS base
+FROM golang:1.23-alpine AS builder
 WORKDIR /app
-
-FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci
-
-FROM deps AS build
+COPY go.mod go.sum ./
+RUN go mod download
 COPY . .
-RUN npm run build
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /nextclip ./cmd/server
 
-FROM node:20-alpine AS runtime
+FROM alpine:3.19
+RUN apk add --no-cache ca-certificates
 WORKDIR /app
-ENV NODE_ENV=production
-ENV PORT=5000
-
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
-
-COPY --from=build /app/dist ./dist
-
+COPY --from=builder /nextclip .
+COPY --from=builder /app/client/dist ./dist/public
 EXPOSE 5000
-CMD ["node", "dist/index.cjs"]
+ENV PORT=5000
+CMD ["./nextclip"]

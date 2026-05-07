@@ -1,9 +1,24 @@
-node_modules
-dist
+# Binary
+nextclip
+/cmd/server/server
+
+# Database
+*.db
+
+# OS
 .DS_Store
-server/public
-vite.config.ts.*
-*.tar.gz
-clipboard.db
-clipboard.db-shm
-clipboard.db-wal
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Build
+/dist/
+
+# Node (client build)
+node_modules/
+
+# Go
+/vendor/

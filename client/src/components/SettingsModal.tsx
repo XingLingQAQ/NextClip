@@ -5,7 +5,7 @@ import {
   RefreshCw, Timer, LogOut, QrCode, ScrollText, ChevronDown, ChevronUp,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import type { Clip, User } from "@shared/schema";
+import type { Clip, User } from "../lib/types";
 import { useT, type Lang } from "../i18n";
 import { PinInput } from "./PinInput";
 import { LangToggle } from "./LangToggle";

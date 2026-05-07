@@ -1,4 +1,4 @@
-import type { Clip } from "@shared/schema";
+import type { Clip } from "./types";
 
 const DEVICE_NAME_KEY = "cloudclip-device-name";
 
