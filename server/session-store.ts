@@ -1,9 +1,5 @@
 import session from "express-session";
-import Database from "better-sqlite3";
-import path from "path";
-
-const dbPath = path.resolve(process.cwd(), "clipboard.db");
-const db = new Database(dbPath);
+import { db } from "./storage";
 
 // Session storage table for persistent login sessions across server restarts.
 db.exec(`

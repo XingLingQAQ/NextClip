@@ -78,6 +78,9 @@ app.use((req, res, next) => {
   res.setHeader("X-Frame-Options", "DENY");
 
   if (process.env.NODE_ENV === "production") {
+    // HSTS: enforce HTTPS for 1 year, include subdomains
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains; preload");
+
     const csp = [
       "default-src 'self'",
       "connect-src 'self' ws: wss:",
