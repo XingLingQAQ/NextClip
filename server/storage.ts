@@ -169,24 +169,42 @@ function cleanExpiredRooms() {
 cleanExpiredRooms();
 setInterval(cleanExpiredRooms, 60 * 1000).unref();
 
+// Audit event retention: delete events older than 30 days
+const AUDIT_RETENTION_DAYS = 30;
+function cleanExpiredAuditEvents() {
+  const cutoff = new Date(Date.now() - AUDIT_RETENTION_DAYS * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare(`DELETE FROM audit_events WHERE created_at < ?`).run(cutoff);
+}
+cleanExpiredAuditEvents();
+setInterval(cleanExpiredAuditEvents, 60 * 60 * 1000).unref(); // Run hourly
+
 export const storage = {
   // ===== Users =====
   createUser(username: string, password: string): User {
     const id = randomUUID();
     const createdAt = new Date().toISOString();
-    db.prepare(`INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`)
-      .run(id, username, hashPassword(password), createdAt);
-    return { id, username, createdAt };
+    const normalizedUsername = username.toLowerCase();
+    try {
+      db.prepare(`INSERT INTO users (id, username, password_hash, created_at) VALUES (?, ?, ?, ?)`)
+        .run(id, normalizedUsername, hashPassword(password), createdAt);
+    } catch (err: any) {
+      if (err?.code === "SQLITE_CONSTRAINT_UNIQUE" || err?.message?.includes("UNIQUE")) {
+        throw new Error("Username already taken");
+      }
+      console.error("Failed to create user:", err);
+      throw err;
+    }
+    return { id, username: normalizedUsername, createdAt };
   },
 
   getUser(username: string): (User & { passwordHash: string }) | null {
-    const row = db.prepare(`SELECT * FROM users WHERE username = ?`).get(username) as any;
+    const row = db.prepare(`SELECT * FROM users WHERE username = ?`).get(username.toLowerCase()) as any;
     if (!row) return null;
     return { id: row.id, username: row.username, createdAt: row.created_at, passwordHash: row.password_hash };
   },
 
   verifyUser(username: string, password: string): User | null {
-    const user = this.getUser(username);
+    const user = this.getUser(username.toLowerCase());
     if (!user) return null;
     const result = verifyPassword(password, user.passwordHash);
     if (!result.matched) return null;
@@ -205,6 +223,20 @@ export const storage = {
     return { id: row.id, username: row.username, createdAt: row.created_at };
   },
 
+  updateUserPassword(userId: string, newPassword: string): boolean {
+    return db.prepare(`UPDATE users SET password_hash = ? WHERE id = ?`)
+      .run(hashPassword(newPassword), userId).changes > 0;
+  },
+
+  deleteUser(userId: string): void {
+    // Remove ownership from rooms owned by this user (make them unowned)
+    db.prepare(`UPDATE rooms SET owner_id = NULL WHERE owner_id = ?`).run(userId);
+    // Delete user sessions
+    db.prepare(`DELETE FROM user_sessions WHERE data LIKE ?`).run(`%"userId":"${userId}"%`);
+    // Delete the user record
+    db.prepare(`DELETE FROM users WHERE id = ?`).run(userId);
+  },
+
   // ===== Rooms =====
   getRoom(roomCode: string): RoomInfo | null {
     const row = db.prepare(`SELECT * FROM rooms WHERE room_code = ?`).get(roomCode) as any;
@@ -219,8 +251,13 @@ export const storage = {
   },
 
   createRoom(roomCode: string, ownerId?: string, password?: string, expiresAt?: string): RoomInfo {
-    db.prepare(`INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`)
-      .run(roomCode, password ? hashPassword(password) : null, ownerId || null, expiresAt || null, new Date().toISOString());
+    try {
+      db.prepare(`INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)`)
+        .run(roomCode, password ? hashPassword(password) : null, ownerId || null, expiresAt || null, new Date().toISOString());
+    } catch (err) {
+      console.error("Failed to create room:", err);
+      throw err;
+    }
     return { roomCode, hasPassword: !!password, expiresAt: expiresAt || null, ownerId: ownerId || null };
   },
 
@@ -263,53 +300,58 @@ export const storage = {
     attachments?: any[],
     idempotencyKey?: string,
   ): Clip {
-    if (idempotencyKey) {
-      const existing = db.prepare(`
-        SELECT * FROM clips
-        WHERE room_code = ? AND idempotency_key = ? AND deleted_at IS NULL
-      `).get(roomCode, idempotencyKey) as any;
-      if (existing) {
-        return {
-          id: existing.id,
-          roomCode: existing.room_code,
-          content: existing.content,
-          type: existing.type as Clip["type"],
-          timestamp: existing.timestamp,
-          sourceDevice: existing.source_device,
-          metadata: existing.metadata || undefined,
-          isSensitive: existing.is_sensitive === 1,
-          burnAfterRead: existing.burn_after_read === 1,
-          attachments: existing.attachments ? JSON.parse(existing.attachments) : undefined,
-        };
+    try {
+      if (idempotencyKey) {
+        const existing = db.prepare(`
+          SELECT * FROM clips
+          WHERE room_code = ? AND idempotency_key = ? AND deleted_at IS NULL
+        `).get(roomCode, idempotencyKey) as any;
+        if (existing) {
+          return {
+            id: existing.id,
+            roomCode: existing.room_code,
+            content: existing.content,
+            type: existing.type as Clip["type"],
+            timestamp: existing.timestamp,
+            sourceDevice: existing.source_device,
+            metadata: existing.metadata || undefined,
+            isSensitive: existing.is_sensitive === 1,
+            burnAfterRead: existing.burn_after_read === 1,
+            attachments: existing.attachments ? JSON.parse(existing.attachments) : undefined,
+          };
+        }
       }
-    }
 
-    const id = randomUUID();
-    const timestamp = new Date().toISOString();
-    const attJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
-    db.prepare(`
-      INSERT INTO clips (
-        id, room_code, content, type, timestamp, source_device, metadata, is_sensitive,
-        burn_after_read, attachments, updated_at, version, idempotency_key
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-    `).run(
-      id,
-      roomCode,
-      content,
-      type,
-      timestamp,
-      sourceDevice,
-      metadata || null,
-      isSensitive ? 1 : 0,
-      burnAfterRead ? 1 : 0,
-      attJson,
-      timestamp,
-      idempotencyKey || null,
-    );
-    return { id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
-      metadata: metadata || undefined, isSensitive: !!isSensitive, burnAfterRead: !!burnAfterRead,
-      attachments: attachments || undefined };
+      const id = randomUUID();
+      const timestamp = new Date().toISOString();
+      const attJson = attachments && attachments.length > 0 ? JSON.stringify(attachments) : null;
+      db.prepare(`
+        INSERT INTO clips (
+          id, room_code, content, type, timestamp, source_device, metadata, is_sensitive,
+          burn_after_read, attachments, updated_at, version, idempotency_key
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
+      `).run(
+        id,
+        roomCode,
+        content,
+        type,
+        timestamp,
+        sourceDevice,
+        metadata || null,
+        isSensitive ? 1 : 0,
+        burnAfterRead ? 1 : 0,
+        attJson,
+        timestamp,
+        idempotencyKey || null,
+      );
+      return { id, roomCode, content, type: type as Clip["type"], timestamp, sourceDevice,
+        metadata: metadata || undefined, isSensitive: !!isSensitive, burnAfterRead: !!burnAfterRead,
+        attachments: attachments || undefined };
+    } catch (err) {
+      console.error("Failed to create clip:", err);
+      throw err;
+    }
   },
 
   updateClip(id: string, roomCode: string, content: string, type: string): boolean {
@@ -431,19 +473,23 @@ export const storage = {
   },
 
   addAuditEvent(roomCode: string, eventType: string, clipId?: string, actorUserId?: string, actorDeviceId?: string, payload?: Record<string, unknown>): void {
-    db.prepare(`
-      INSERT INTO audit_events (id, room_code, clip_id, event_type, actor_user_id, actor_device_id, payload, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      randomUUID(),
-      roomCode,
-      clipId || null,
-      eventType,
-      actorUserId || null,
-      actorDeviceId || null,
-      payload ? JSON.stringify(payload) : null,
-      new Date().toISOString(),
-    );
+    try {
+      db.prepare(`
+        INSERT INTO audit_events (id, room_code, clip_id, event_type, actor_user_id, actor_device_id, payload, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        randomUUID(),
+        roomCode,
+        clipId || null,
+        eventType,
+        actorUserId || null,
+        actorDeviceId || null,
+        payload ? JSON.stringify(payload) : null,
+        new Date().toISOString(),
+      );
+    } catch (err) {
+      console.error("Failed to write audit event:", err);
+    }
   },
 
   /** Consume a burn-after-read clip: marks it as deleted and returns true if it was BAR */

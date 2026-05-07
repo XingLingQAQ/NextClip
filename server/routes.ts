@@ -104,9 +104,9 @@ const clipPayloadSchema = z.object({
   attachments: z.array(z.object({
     name: z.string().max(256),
     mimeType: z.string().max(120),
-    data: z.string().max(10 * 1024 * 1024),
-    size: z.number().min(0).max(10 * 1024 * 1024),
-  })).max(10).optional(),
+    data: z.string().max(2 * 1024 * 1024), // 2MB per attachment (base64)
+    size: z.number().min(0).max(2 * 1024 * 1024),
+  })).max(5).optional(),
 });
 
 function assertRoomOwner(
@@ -239,7 +239,7 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       },
     },
     path: "/socket.io",
-    maxHttpBufferSize: 10 * 1024 * 1024,
+    maxHttpBufferSize: 5 * 1024 * 1024, // 5MB max per message to prevent oversized payloads
   });
 
   app.get("/api/auth/csrf", (req, res) => {
@@ -273,6 +273,41 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post("/api/auth/logout", requireAuth, (req, res) => {
+    req.session.destroy(() => {
+      res.clearCookie("connect.sid");
+      res.json({ success: true });
+    });
+  });
+
+  app.post("/api/auth/password", rateLimit("auth-password", 10, 10 * 60 * 1000), requireAuth, (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || typeof currentPassword !== "string" || !newPassword || typeof newPassword !== "string") {
+      return res.status(400).json({ message: "Current password and new password required" });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: "New password must be at least 6 characters" });
+    }
+    const user = storage.getUser(req.currentUser!.username);
+    if (!user) return res.status(401).json({ message: "User not found" });
+    const verification = storage.verifyUser(user.username, currentPassword);
+    if (!verification) {
+      return res.status(403).json({ message: "Current password is incorrect" });
+    }
+    storage.updateUserPassword(req.currentUser!.id, newPassword);
+    res.json({ success: true });
+  });
+
+  app.delete("/api/auth/account", rateLimit("auth-delete", 5, 10 * 60 * 1000), requireAuth, (req, res) => {
+    const { password } = req.body;
+    if (!password || typeof password !== "string") {
+      return res.status(400).json({ message: "Password confirmation required" });
+    }
+    const verification = storage.verifyUser(req.currentUser!.username, password);
+    if (!verification) {
+      return res.status(403).json({ message: "Incorrect password" });
+    }
+    const userId = req.currentUser!.id;
+    storage.deleteUser(userId);
     req.session.destroy(() => {
       res.clearCookie("connect.sid");
       res.json({ success: true });
