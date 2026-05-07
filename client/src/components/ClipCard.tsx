@@ -5,7 +5,7 @@ import {
   Scissors, File, Paperclip, Shield, Flame, CheckCircle2,
   Eye, EyeOff, Download, Smartphone,
 } from "lucide-react";
-import type { Clip, Attachment } from "@shared/schema";
+import type { Clip, Attachment } from "../lib/types";
 import { formatFileSize, downloadDataUrl, getDeviceName, formatRelativeTime } from "../lib/clipUtils";
 
 export function ClipCard({

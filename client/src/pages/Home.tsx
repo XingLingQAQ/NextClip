@@ -11,8 +11,8 @@ import {
   Bell, BellOff, Trash2, RotateCcw, Keyboard,
 } from "lucide-react";
 
-import { io, Socket } from "socket.io-client";
-import type { Clip, RoomMessage, Attachment, User, RoomDevice } from "@shared/schema";
+import type { Clip, Attachment, User, RoomDevice } from "../lib/types";
+import { createWSClient, type WSClient } from "../lib/websocket";
 import { useT } from "../i18n";
 import { PinInput } from "../components/PinInput";
 import { LangToggle } from "../components/LangToggle";
@@ -84,7 +84,7 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomDevices, setRoomDevices] = useState<RoomDevice[]>([]);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<WSClient | null>(null);
   const roomTokenRef = useRef<string>("");
   const csrfBootstrapRef = useRef<Promise<void> | null>(null);
 
@@ -205,19 +205,40 @@ export default function Home() {
   const connectSocket = useCallback((code: string, token?: string) => {
     if (token) roomTokenRef.current = token;
     if (socketRef.current) socketRef.current.disconnect();
-    const socket = io(window.location.origin, { transports: ["websocket", "polling"], path: "/socket.io" });
-    socket.on("connect", () => {
-      setIsConnected(true);
-      socket.emit("join-room", {
-        roomCode: code,
-        token: roomTokenRef.current,
-        deviceId: deviceIdRef.current,
-        deviceName: deviceNameRef.current,
-      });
+
+    const wsProtocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+    const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
+    const client = createWSClient();
+
+    client.onStatus((connected) => {
+      setIsConnected(connected);
+      if (connected) {
+        client.send("join-room", {
+          roomCode: code,
+          token: roomTokenRef.current,
+          deviceId: deviceIdRef.current,
+          deviceName: deviceNameRef.current,
+        });
+      }
     });
-    socket.on("disconnect", () => setIsConnected(false));
-    socket.on("room-error", () => { handleLeaveRoom(); });
-    socket.on("room-message", (msg: RoomMessage) => {
+
+    client.onMessage((msg: any) => {
+      // Handle room-users count message
+      if (msg.type === "room-users") {
+        setOnlineCount(msg.count || 0);
+        return;
+      }
+      // Handle room-devices
+      if (msg.type === "room-devices") {
+        setRoomDevices(msg.devices || []);
+        return;
+      }
+      // Handle error
+      if (msg.type === "error") {
+        handleLeaveRoom();
+        return;
+      }
+      // Handle clip messages (same as RoomMessage)
       switch (msg.type) {
         case "clip:history":
           setClips(msg.clips || []);
@@ -239,7 +260,7 @@ export default function Home() {
                 icon: "/favicon.ico",
                 tag: "cloudclip-new",
                 renotify: true,
-              });
+              } as NotificationOptions);
             }
           }
           break;
@@ -260,9 +281,9 @@ export default function Home() {
           break;
       }
     });
-    socket.on("room-users", (count: number) => setOnlineCount(count));
-    socket.on("room-devices", (devices: RoomDevice[]) => setRoomDevices(devices || []));
-    socketRef.current = socket;
+
+    client.connect(wsUrl);
+    socketRef.current = client;
   }, []);
 
   const handleJoinRoom = async () => {
@@ -398,7 +419,7 @@ export default function Home() {
       await navigator.clipboard.writeText(content);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
-      if (burn) setTimeout(() => socketRef.current?.emit("delete-clip", id), 500);
+      if (burn) setTimeout(() => socketRef.current?.send("consume-clip", id), 500);
     } catch { alert(t("failedCopy")); }
   };
 
@@ -410,7 +431,7 @@ export default function Home() {
       type = composeAttachments[0].mimeType.startsWith("image/") ? "image" : "file";
     } else type = detectType(composeText);
 
-    socketRef.current.emit("send-clip", {
+    socketRef.current.send("send-clip", {
       content: composeText.trim(), type, sourceDevice: deviceName,
       isSensitive: composeSettings.sensitive, burnAfterRead: composeSettings.burn,
       attachments: composeAttachments.length > 0 ? composeAttachments : undefined,
@@ -440,8 +461,8 @@ export default function Home() {
     });
   };
 
-  const handleDelete = (id: string) => socketRef.current?.emit("delete-clip", id);
-  const doClearAll = () => { socketRef.current?.emit("clear-room"); setShowClearConfirm(false); };
+  const handleDelete = (id: string) => socketRef.current?.send("delete-clip", id);
+  const doClearAll = () => { socketRef.current?.send("clear-room"); setShowClearConfirm(false); };
   const handleClearAll = () => { if (clips.length > 0) setShowClearConfirm(true); };
 
   const handleRestore = async (clip: Clip) => {
@@ -548,7 +569,7 @@ export default function Home() {
 
   const handleToggleStar = (id: string) => {
     const nextPinned = !starredIds.has(id);
-    socketRef.current?.emit("pin-clip", { clipId: id, pinned: nextPinned });
+    socketRef.current?.send("pin-clip", { clipId: id, pinned: nextPinned });
   };
 
   useEffect(() => {
@@ -581,7 +602,7 @@ export default function Home() {
 
   const handleSaveEdit = () => {
     if (!detailClip || !socketRef.current) return;
-    socketRef.current.emit("update-clip", {
+    socketRef.current.send("update-clip", {
       clipId: detailClip.id,
       content: detailEditContent,
       type: detectType(detailEditContent),
@@ -1636,8 +1657,8 @@ export default function Home() {
               const persisted = saveDeviceName(normalized);
               const nextDeviceName = persisted || getDeviceName();
               setDeviceName(nextDeviceName);
-              if (socketRef.current?.connected && roomCode) {
-                socketRef.current.emit("join-room", {
+              if (socketRef.current?.isConnected() && roomCode) {
+                socketRef.current.send("join-room", {
                   roomCode,
                   token: roomTokenRef.current,
                   deviceId: deviceIdRef.current,
