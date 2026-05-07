@@ -232,8 +232,16 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: (origin, callback) => {
+        // Allow server-to-server (no origin header)
         if (!origin) return callback(null, true);
-        if (allowedOrigins.length === 0) return callback(null, true);
+        // In production, ALLOWED_ORIGINS must be configured; reject all unknown origins
+        if (allowedOrigins.length === 0) {
+          if (process.env.NODE_ENV === "production") {
+            return callback(new Error("ALLOWED_ORIGINS not configured. Set the environment variable."));
+          }
+          // In development, allow all origins for convenience
+          return callback(null, true);
+        }
         if (allowedOrigins.includes(origin)) return callback(null, true);
         return callback(new Error("Origin not allowed"));
       },

@@ -5,7 +5,7 @@ import { randomUUID } from "crypto";
 import crypto from "crypto";
 
 const dbPath = path.resolve(process.cwd(), "clipboard.db");
-const db = new Database(dbPath);
+export const db = new Database(dbPath);
 db.pragma("journal_mode = WAL");
 db.pragma("foreign_keys = ON");
 
