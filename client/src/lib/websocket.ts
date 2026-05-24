@@ -100,9 +100,10 @@ export class WSClient {
   /**
    * Send a typed message to the server.
    * Mirrors socket.emit(eventName, data) from Socket.io.
+   * The event name is sent as "_event" to avoid conflicts with data fields named "type".
    */
   emit(eventName: string, data?: any): void {
-    const message = JSON.stringify({ type: eventName, ...data });
+    const message = JSON.stringify({ _event: eventName, ...data });
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(message);
     } else {

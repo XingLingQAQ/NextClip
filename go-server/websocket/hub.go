@@ -55,8 +55,13 @@ func NewHub(store *storage.Store, tokenValidator TokenValidator) *Hub {
 }
 
 // BroadcastToRoom sends a message to all clients in a room.
+// Messages are wrapped in {"type":"room-message","data":{...}} envelope for the client.
 func (h *Hub) BroadcastToRoom(roomCode string, msg models.RoomMessage) {
-	data, err := json.Marshal(msg)
+	envelope := map[string]interface{}{
+		"type": "room-message",
+		"data": msg,
+	}
+	data, err := json.Marshal(envelope)
 	if err != nil {
 		return
 	}
@@ -80,8 +85,13 @@ func (h *Hub) BroadcastToRoom(roomCode string, msg models.RoomMessage) {
 }
 
 // BroadcastToClient sends a message to a specific client.
+// Messages are wrapped in {"type":"room-message","data":{...}} envelope for the client.
 func (h *Hub) BroadcastToClient(client *Client, msg models.RoomMessage) {
-	data, err := json.Marshal(msg)
+	envelope := map[string]interface{}{
+		"type": "room-message",
+		"data": msg,
+	}
+	data, err := json.Marshal(envelope)
 	if err != nil {
 		return
 	}
@@ -285,7 +295,12 @@ func (c *Client) handleMessage(raw []byte) {
 		return
 	}
 
-	eventType, _ := msg["type"].(string)
+	// Client sends event name as "_event" field to avoid collision with data "type" field
+	eventType, _ := msg["_event"].(string)
+	if eventType == "" {
+		// Fallback: try "type" field for backward compatibility
+		eventType, _ = msg["type"].(string)
+	}
 
 	switch eventType {
 	case "join-room":
@@ -324,7 +339,10 @@ func (c *Client) handleJoinRoom(msg map[string]interface{}) {
 			"type": "room-error",
 			"data": map[string]string{"message": "Invalid room token. Please rejoin."},
 		})
-		c.send <- errMsg
+		select {
+		case c.send <- errMsg:
+		default:
+		}
 		return
 	}
 
@@ -372,7 +390,10 @@ func (c *Client) handleSendClip(msg map[string]interface{}) {
 			"type": "room-error",
 			"data": map[string]string{"message": "Room expired. Please rejoin."},
 		})
-		c.send <- errMsg
+		select {
+		case c.send <- errMsg:
+		default:
+		}
 		return
 	}
 
@@ -425,8 +446,12 @@ func (c *Client) handleSendClip(msg map[string]interface{}) {
 	if targetDeviceID == "" || targetDeviceID == "all" {
 		c.hub.BroadcastToRoom(c.room, roomMsg)
 	} else {
-		// Send to target device and sender
-		data, _ := json.Marshal(roomMsg)
+		// Send to target device and sender (with envelope)
+		envelope := map[string]interface{}{
+			"type": "room-message",
+			"data": roomMsg,
+		}
+		data, _ := json.Marshal(envelope)
 		targets := c.hub.getClientsByDeviceID(c.room, targetDeviceID)
 		for _, target := range targets {
 			select {

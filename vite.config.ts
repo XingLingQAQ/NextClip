@@ -31,6 +31,12 @@ export default defineConfig({
         target: "ws://localhost:5000",
         ws: true,
       },
+      "/healthz": {
+        target: "http://localhost:5000",
+      },
+      "/readyz": {
+        target: "http://localhost:5000",
+      },
     },
   },
 });
