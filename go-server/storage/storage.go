@@ -12,7 +12,6 @@ import (
 	"math"
 	"regexp"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/XingLingQAQ/NextClip/go-server/models"
@@ -35,7 +34,6 @@ var legacySha256Re = regexp.MustCompile(`^[a-f0-9]{64}$`)
 // Store handles all database operations.
 type Store struct {
 	db *sql.DB
-	mu sync.RWMutex
 }
 
 // New creates a new Store and initializes the database schema.

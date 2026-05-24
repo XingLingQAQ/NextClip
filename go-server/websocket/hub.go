@@ -63,9 +63,14 @@ func (h *Hub) BroadcastToRoom(roomCode string, msg models.RoomMessage) {
 
 	h.mu.RLock()
 	clients := h.rooms[roomCode]
+	// Copy client references while holding the lock to avoid race on map iteration
+	targets := make([]*Client, 0, len(clients))
+	for client := range clients {
+		targets = append(targets, client)
+	}
 	h.mu.RUnlock()
 
-	for client := range clients {
+	for _, client := range targets {
 		select {
 		case client.send <- data:
 		default:
@@ -96,6 +101,11 @@ func (h *Hub) emitRoomUsers(roomCode string) {
 			devices = append(devices, *d)
 		}
 	}
+	// Copy client references while holding the lock
+	targets := make([]*Client, 0, len(clients))
+	for client := range clients {
+		targets = append(targets, client)
+	}
 	h.mu.RUnlock()
 
 	// Send room-users count
@@ -109,8 +119,7 @@ func (h *Hub) emitRoomUsers(roomCode string) {
 		"data": devices,
 	})
 
-	h.mu.RLock()
-	for client := range clients {
+	for _, client := range targets {
 		select {
 		case client.send <- countMsg:
 		default:
@@ -120,7 +129,6 @@ func (h *Hub) emitRoomUsers(roomCode string) {
 		default:
 		}
 	}
-	h.mu.RUnlock()
 }
 
 func (h *Hub) addClient(client *Client, roomCode string) {
@@ -322,6 +330,7 @@ func (c *Client) handleJoinRoom(msg map[string]interface{}) {
 
 	// Leave current room
 	if c.room != "" {
+		oldRoom := c.room
 		c.hub.mu.Lock()
 		delete(c.hub.rooms[c.room], c)
 		if len(c.hub.rooms[c.room]) == 0 {
@@ -331,6 +340,8 @@ func (c *Client) handleJoinRoom(msg map[string]interface{}) {
 			delete(devMap, c.ID)
 		}
 		c.hub.mu.Unlock()
+		// Notify remaining clients in the old room about the updated user count
+		c.hub.emitRoomUsers(oldRoom)
 	}
 
 	c.room = roomCode
