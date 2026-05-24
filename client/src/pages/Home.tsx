@@ -11,7 +11,7 @@ import {
   Bell, BellOff, Trash2, RotateCcw, Keyboard,
 } from "lucide-react";
 
-import { io, Socket } from "socket.io-client";
+import { WSClient, createWSUrl } from "../lib/websocket";
 import type { Clip, RoomMessage, Attachment, User, RoomDevice } from "@shared/schema";
 import { useT } from "../i18n";
 import { PinInput } from "../components/PinInput";
@@ -84,7 +84,7 @@ export default function Home() {
   const [isConnected, setIsConnected] = useState(false);
   const [onlineCount, setOnlineCount] = useState(0);
   const [roomDevices, setRoomDevices] = useState<RoomDevice[]>([]);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<WSClient | null>(null);
   const roomTokenRef = useRef<string>("");
   const csrfBootstrapRef = useRef<Promise<void> | null>(null);
 
@@ -205,19 +205,19 @@ export default function Home() {
   const connectSocket = useCallback((code: string, token?: string) => {
     if (token) roomTokenRef.current = token;
     if (socketRef.current) socketRef.current.disconnect();
-    const socket = io(window.location.origin, { transports: ["websocket", "polling"], path: "/socket.io" });
-    socket.on("connect", () => {
+    const ws = new WSClient({ url: createWSUrl() });
+    ws.on("connect", () => {
       setIsConnected(true);
-      socket.emit("join-room", {
+      ws.emit("join-room", {
         roomCode: code,
         token: roomTokenRef.current,
         deviceId: deviceIdRef.current,
         deviceName: deviceNameRef.current,
       });
     });
-    socket.on("disconnect", () => setIsConnected(false));
-    socket.on("room-error", () => { handleLeaveRoom(); });
-    socket.on("room-message", (msg: RoomMessage) => {
+    ws.on("disconnect", () => setIsConnected(false));
+    ws.on("room-error", () => { handleLeaveRoom(); });
+    ws.on("room-message", (msg: RoomMessage) => {
       switch (msg.type) {
         case "clip:history":
           setClips(msg.clips || []);
@@ -260,9 +260,10 @@ export default function Home() {
           break;
       }
     });
-    socket.on("room-users", (count: number) => setOnlineCount(count));
-    socket.on("room-devices", (devices: RoomDevice[]) => setRoomDevices(devices || []));
-    socketRef.current = socket;
+    ws.on("room-users", (count: number) => setOnlineCount(count));
+    ws.on("room-devices", (devices: RoomDevice[]) => setRoomDevices(devices || []));
+    ws.connect();
+    socketRef.current = ws;
   }, []);
 
   const handleJoinRoom = async () => {
@@ -398,7 +399,7 @@ export default function Home() {
       await navigator.clipboard.writeText(content);
       setCopiedId(id);
       setTimeout(() => setCopiedId(null), 2000);
-      if (burn) setTimeout(() => socketRef.current?.emit("delete-clip", id), 500);
+      if (burn) setTimeout(() => socketRef.current?.emit("delete-clip", { clipId: id }), 500);
     } catch { alert(t("failedCopy")); }
   };
 
@@ -440,8 +441,8 @@ export default function Home() {
     });
   };
 
-  const handleDelete = (id: string) => socketRef.current?.emit("delete-clip", id);
-  const doClearAll = () => { socketRef.current?.emit("clear-room"); setShowClearConfirm(false); };
+  const handleDelete = (id: string) => socketRef.current?.emit("delete-clip", { clipId: id });
+  const doClearAll = () => { socketRef.current?.emit("clear-room", {}); setShowClearConfirm(false); };
   const handleClearAll = () => { if (clips.length > 0) setShowClearConfirm(true); };
 
   const handleRestore = async (clip: Clip) => {
