@@ -1,41 +1,27 @@
 import { Hono } from "hono";
 import type { Env, User } from "./types";
-import { hashPassword, verifyPassword, generateId } from "./crypto";
+import { hashPassword, verifyPassword } from "./crypto";
+import { issueRoomToken, validateRoomToken, revokeRoomTokens } from "./token-store";
 
-// In-memory room tokens (per-isolate; acceptable for Workers since tokens are short-lived)
-const roomTokens = new Map<string, Map<string, number>>(); // roomCode -> token -> expiresAt
-const ROOM_TOKEN_TTL = 24 * 60 * 60 * 1000;
-
-export function issueRoomToken(roomCode: string): string {
-  const token = crypto.randomUUID();
-  if (!roomTokens.has(roomCode)) roomTokens.set(roomCode, new Map());
-  roomTokens.get(roomCode)!.set(token, Date.now() + ROOM_TOKEN_TTL);
-  return token;
-}
-
-export function validateRoomToken(roomCode: string, token: string): boolean {
-  const tokens = roomTokens.get(roomCode);
-  if (!tokens) return false;
-  const exp = tokens.get(token);
-  if (!exp) return false;
-  if (exp < Date.now()) { tokens.delete(token); return false; }
-  return true;
-}
-
-function revokeRoomTokens(roomCode: string) { roomTokens.delete(roomCode); }
+// Re-export for use in clips.ts
+export { validateRoomToken };
 
 const rooms = new Hono<{ Bindings: Env; Variables: { user?: User } }>();
 
 // Get room info
 rooms.get("/:roomCode", async (c) => {
   const roomCode = c.req.param("roomCode");
-  const row = await c.env.DB.prepare("SELECT room_code, password_hash, owner_id, expires_at, created_at FROM rooms WHERE room_code = ?")
-    .bind(roomCode).first<any>();
+  const row = await c.env.DB.prepare(
+    "SELECT room_code, password_hash, owner_id, expires_at, created_at FROM rooms WHERE room_code = ?"
+  ).bind(roomCode).first<any>();
   if (!row) return c.json({ exists: false });
 
   const user = c.get("user");
   const token = c.req.header("X-Room-Token") || c.req.query("token") || "";
-  const canManage = !!user && row.owner_id === user.id && !!token && validateRoomToken(roomCode, token);
+  let canManage = false;
+  if (user && row.owner_id === user.id && token) {
+    canManage = await validateRoomToken(c.env.DB, roomCode, token);
+  }
 
   const resp: any = { exists: true, hasPassword: !!row.password_hash, canManage };
   if (canManage) { resp.expiresAt = row.expires_at; resp.createdAt = row.created_at; }
@@ -45,17 +31,19 @@ rooms.get("/:roomCode", async (c) => {
 // Join room
 rooms.post("/:roomCode/join", async (c) => {
   const roomCode = c.req.param("roomCode");
-  const body = await c.req.json<{ password?: string }>().catch(() => ({}));
+  const body: { password?: string } = await c.req.json<{ password?: string }>().catch(() => ({}));
 
-  const row = await c.env.DB.prepare("SELECT room_code, password_hash, owner_id, expires_at FROM rooms WHERE room_code = ?")
-    .bind(roomCode).first<any>();
+  const row = await c.env.DB.prepare(
+    "SELECT room_code, password_hash, owner_id, expires_at FROM rooms WHERE room_code = ?"
+  ).bind(roomCode).first<any>();
 
   if (!row) {
     const expiresAt = new Date(Date.now() + 24 * 3600000).toISOString();
     const user = c.get("user");
-    await c.env.DB.prepare("INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
-      .bind(roomCode, null, user?.id || null, expiresAt, new Date().toISOString()).run();
-    const token = issueRoomToken(roomCode);
+    await c.env.DB.prepare(
+      "INSERT INTO rooms (room_code, password_hash, owner_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)"
+    ).bind(roomCode, null, user?.id || null, expiresAt, new Date().toISOString()).run();
+    const token = await issueRoomToken(c.env.DB, roomCode);
     return c.json({ success: true, created: true, hasPassword: false, token });
   }
 
@@ -69,7 +57,7 @@ rooms.post("/:roomCode/join", async (c) => {
     }
   }
 
-  const token = issueRoomToken(roomCode);
+  const token = await issueRoomToken(c.env.DB, roomCode);
   return c.json({ success: true, created: false, hasPassword: !!row.password_hash, expiresAt: row.expires_at, token });
 });
 
@@ -79,7 +67,9 @@ rooms.post("/:roomCode/password", async (c) => {
   if (!user) return c.json({ message: "Unauthorized" }, 401);
   const roomCode = c.req.param("roomCode");
   const body = await c.req.json<{ password?: string; token?: string }>();
-  if (!body.token || !validateRoomToken(roomCode, body.token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!body.token || !(await validateRoomToken(c.env.DB, roomCode, body.token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   if (body.password && !/^\d{6}$/.test(body.password)) {
     return c.json({ message: "Password must be exactly 6 digits" }, 400);
@@ -87,7 +77,7 @@ rooms.post("/:roomCode/password", async (c) => {
 
   const hash = body.password ? await hashPassword(body.password) : null;
   await c.env.DB.prepare("UPDATE rooms SET password_hash = ? WHERE room_code = ?").bind(hash, roomCode).run();
-  revokeRoomTokens(roomCode);
+  await revokeRoomTokens(c.env.DB, roomCode);
   return c.json({ success: true });
 });
 
@@ -97,7 +87,9 @@ rooms.post("/:roomCode/expiry", async (c) => {
   if (!user) return c.json({ message: "Unauthorized" }, 401);
   const roomCode = c.req.param("roomCode");
   const body = await c.req.json<{ expiryHours?: string | number; token?: string }>();
-  if (!body.token || !validateRoomToken(roomCode, body.token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!body.token || !(await validateRoomToken(c.env.DB, roomCode, body.token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const validExpiry = new Set(["1", "24", "168", "720", "permanent"]);
   const expiryStr = String(body.expiryHours || "");

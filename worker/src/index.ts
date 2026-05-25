@@ -1,6 +1,7 @@
 /**
  * NextClip Cloudflare Worker - Main Entry Point
  * Provides the same API as the Go server but runs on Cloudflare's edge.
+ * Uses D1 for persistence, Durable Objects for WebSocket rooms.
  */
 import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
@@ -16,14 +17,16 @@ const app = new Hono<{ Bindings: Env; Variables: { user?: User; sessionId?: stri
 app.use("/api/*", async (c, next) => {
   const sid = getCookie(c, "connect.sid");
   if (sid) {
-    const row = await c.env.DB.prepare("SELECT data, expires_at FROM user_sessions WHERE sid = ?")
-      .bind(sid).first<{ data: string; expires_at: number }>();
+    const row = await c.env.DB.prepare(
+      "SELECT data, expires_at FROM user_sessions WHERE sid = ?"
+    ).bind(sid).first<{ data: string; expires_at: number }>();
     if (row && row.expires_at > Date.now()) {
       try {
         const sessionData = JSON.parse(row.data);
         if (sessionData.userId) {
-          const userRow = await c.env.DB.prepare("SELECT id, username, created_at FROM users WHERE id = ?")
-            .bind(sessionData.userId).first<{ id: string; username: string; created_at: string }>();
+          const userRow = await c.env.DB.prepare(
+            "SELECT id, username, created_at FROM users WHERE id = ?"
+          ).bind(sessionData.userId).first<{ id: string; username: string; created_at: string }>();
           if (userRow) {
             c.set("user", { id: userRow.id, username: userRow.username, createdAt: userRow.created_at });
             c.set("sessionId", sid);
@@ -59,14 +62,16 @@ app.use("/api/*", async (c, next) => {
 app.get("/healthz", (c) => c.json({ ok: true }));
 app.get("/readyz", (c) => c.json({ ready: true }));
 
-// --- WebSocket upgrade (routes to Durable Object) ---
+// --- WebSocket upgrade (routes to per-room Durable Object) ---
 app.get("/ws", async (c) => {
   if (c.req.header("Upgrade") !== "websocket") {
     return c.text("Expected WebSocket", 426);
   }
-  // Route to a global room DO (clients send join-room to specify which room)
-  // In production, you'd route based on a query param for efficiency
-  const doId = c.env.ROOM.idFromName("global-ws-hub");
+
+  // Client connects to /ws?room=<roomCode>
+  // If no room param, use a default (client will send join-room with roomCode anyway)
+  const roomCode = c.req.query("room") || "__default__";
+  const doId = c.env.ROOM.idFromName(roomCode);
   const stub = c.env.ROOM.get(doId);
   return stub.fetch(c.req.raw);
 });
@@ -77,10 +82,11 @@ app.route("/api/rooms", rooms);
 app.route("/api/rooms", clips);
 
 // --- Static asset fallback (SPA) ---
-app.get("*", async (c) => {
-  // In production with [site] config, Wrangler serves static assets automatically.
-  // This is a fallback for SPA routing.
-  return c.text("NextClip - Use the client app", 200);
+// With wrangler [site] config, static files from dist/public are served automatically.
+// This catches SPA routes that don't match static files.
+app.get("*", (c) => {
+  // Return index.html for SPA routing (handled by Workers Sites / Pages in production)
+  return c.html("<!DOCTYPE html><html><body><p>NextClip Worker running. Deploy with client build for full app.</p></body></html>");
 });
 
 export default app;

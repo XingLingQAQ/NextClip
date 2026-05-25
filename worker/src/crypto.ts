@@ -27,10 +27,10 @@ export async function hashPassword(plainText: string): Promise<string> {
     "raw", encoder.encode(plainText), "PBKDF2", false, ["deriveBits"]
   );
   const derived = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt, iterations: ITERATIONS, hash: "SHA-512" },
+    { name: "PBKDF2", salt: salt.buffer as ArrayBuffer, iterations: ITERATIONS, hash: "SHA-512" },
     keyMaterial, KEY_LEN * 8
   );
-  const saltB64 = bufToBase64(salt);
+  const saltB64 = bufToBase64(salt.buffer as ArrayBuffer);
   const derivedB64 = bufToBase64(derived);
   return `${HASH_ALGO}$${ITERATIONS}$${saltB64}$${derivedB64}`;
 }

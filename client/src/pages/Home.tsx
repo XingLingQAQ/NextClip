@@ -205,7 +205,7 @@ export default function Home() {
   const connectSocket = useCallback((code: string, token?: string) => {
     if (token) roomTokenRef.current = token;
     if (socketRef.current) socketRef.current.disconnect();
-    const ws = new WSClient({ url: createWSUrl() });
+    const ws = new WSClient({ url: createWSUrl(code) });
     ws.on("connect", () => {
       setIsConnected(true);
       ws.emit("join-room", {

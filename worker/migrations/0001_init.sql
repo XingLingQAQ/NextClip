@@ -1,4 +1,4 @@
--- NextClip D1 Schema (mirrors Go server SQLite schema)
+-- NextClip D1 Schema (mirrors Go server SQLite schema + room tokens)
 
 CREATE TABLE IF NOT EXISTS users (
   id TEXT PRIMARY KEY,
@@ -62,3 +62,13 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_sessions_expires ON user_sessions(expires_at);
+
+-- Room tokens (D1-backed, shared across all Worker isolates)
+CREATE TABLE IF NOT EXISTS room_tokens (
+  token TEXT PRIMARY KEY,
+  room_code TEXT NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_room_tokens_room ON room_tokens(room_code);
+CREATE INDEX IF NOT EXISTS idx_room_tokens_expires ON room_tokens(expires_at);

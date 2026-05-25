@@ -153,9 +153,12 @@ export class WSClient {
 }
 
 /**
- * Create a WebSocket URL for the Go backend.
+ * Create a WebSocket URL for the backend.
+ * Passes room code as query param for Cloudflare Workers per-room DO routing.
+ * Go server ignores the query param (routes all connections to the same handler).
  */
-export function createWSUrl(): string {
+export function createWSUrl(roomCode?: string): string {
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}/ws`;
+  const base = `${protocol}//${window.location.host}/ws`;
+  return roomCode ? `${base}?room=${encodeURIComponent(roomCode)}` : base;
 }

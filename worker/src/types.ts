@@ -52,3 +52,9 @@ export interface RoomMessage {
   pinnedClipIds?: string[];
   pinState?: boolean;
 }
+
+export interface RoomDevice {
+  deviceId: string;
+  deviceName: string;
+  socketId: string;
+}

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, User, Clip } from "./types";
 import { generateId } from "./crypto";
-import { validateRoomToken } from "./rooms";
+import { validateRoomToken } from "./token-store";
 
 const clips = new Hono<{ Bindings: Env; Variables: { user?: User } }>();
 
@@ -24,7 +24,9 @@ function rowToClip(r: any): Clip {
 clips.post("/:roomCode/clips", async (c) => {
   const roomCode = c.req.param("roomCode");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const exists = await c.env.DB.prepare("SELECT room_code FROM rooms WHERE room_code = ?").bind(roomCode).first();
   if (!exists) return c.json({ message: "Room not found" }, 404);
@@ -56,7 +58,7 @@ clips.post("/:roomCode/clips", async (c) => {
     attachments: body.attachments || undefined,
   };
 
-  // Broadcast via Durable Object
+  // Broadcast via Durable Object (per-room routing)
   const doId = c.env.ROOM.idFromName(roomCode);
   const stub = c.env.ROOM.get(doId);
   await stub.fetch("http://internal/broadcast", {
@@ -71,7 +73,9 @@ clips.post("/:roomCode/clips", async (c) => {
 clips.get("/:roomCode/clips", async (c) => {
   const roomCode = c.req.param("roomCode");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const before = c.req.query("before");
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "50"), 1), 200);
@@ -88,7 +92,9 @@ clips.get("/:roomCode/clips", async (c) => {
   }
 
   const clps = (rows.results || []).map(rowToClip);
-  const pinnedRows = await c.env.DB.prepare("SELECT clip_id FROM pinned_clips WHERE room_code = ? ORDER BY created_at DESC").bind(roomCode).all();
+  const pinnedRows = await c.env.DB.prepare(
+    "SELECT clip_id FROM pinned_clips WHERE room_code = ? ORDER BY created_at DESC"
+  ).bind(roomCode).all();
   const pinnedClipIds = (pinnedRows.results || []).map((r: any) => r.clip_id);
   const nextCursor = clps.length > 0 ? clps[clps.length - 1].timestamp : null;
 
@@ -100,7 +106,9 @@ clips.get("/:roomCode/clips/since/:timestamp", async (c) => {
   const roomCode = c.req.param("roomCode");
   const since = c.req.param("timestamp");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "200"), 1), 500);
   const rows = await c.env.DB.prepare(
@@ -108,7 +116,11 @@ clips.get("/:roomCode/clips/since/:timestamp", async (c) => {
   ).bind(roomCode, since, limit).all();
 
   const clps = (rows.results || []).map(rowToClip);
-  return c.json({ clips: clps, serverTime: new Date().toISOString(), nextCursor: clps.length ? clps[clps.length - 1].timestamp : since });
+  return c.json({
+    clips: clps,
+    serverTime: new Date().toISOString(),
+    nextCursor: clps.length ? clps[clps.length - 1].timestamp : since,
+  });
 });
 
 // Delete clip
@@ -116,7 +128,9 @@ clips.delete("/:roomCode/clips/:clipId", async (c) => {
   const roomCode = c.req.param("roomCode");
   const clipId = c.req.param("clipId");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const now = new Date().toISOString();
   await c.env.DB.prepare("DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?").bind(roomCode, clipId).run();
@@ -125,6 +139,15 @@ clips.delete("/:roomCode/clips/:clipId", async (c) => {
   ).bind(now, now, clipId, roomCode).run();
 
   if (!result.meta.changes) return c.json({ message: "Clip not found" }, 404);
+
+  // Broadcast delete
+  const doId = c.env.ROOM.idFromName(roomCode);
+  const stub = c.env.ROOM.get(doId);
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ type: "clip:delete", clipId }),
+  });
+
   return c.json({ success: true });
 });
 
@@ -132,13 +155,23 @@ clips.delete("/:roomCode/clips/:clipId", async (c) => {
 clips.delete("/:roomCode/clips", async (c) => {
   const roomCode = c.req.param("roomCode");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const now = new Date().toISOString();
   await c.env.DB.prepare("DELETE FROM pinned_clips WHERE room_code = ?").bind(roomCode).run();
   const result = await c.env.DB.prepare(
     "UPDATE clips SET deleted_at = ?, updated_at = ?, version = version + 1 WHERE room_code = ? AND deleted_at IS NULL"
   ).bind(now, now, roomCode).run();
+
+  // Broadcast clear
+  const doId = c.env.ROOM.idFromName(roomCode);
+  const stub = c.env.ROOM.get(doId);
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ type: "clip:clear" }),
+  });
 
   return c.json({ success: true, deleted: result.meta.changes || 0 });
 });
@@ -148,7 +181,9 @@ clips.post("/:roomCode/clips/:clipId/restore", async (c) => {
   const roomCode = c.req.param("roomCode");
   const clipId = c.req.param("clipId");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const now = new Date().toISOString();
   const result = await c.env.DB.prepare(
@@ -156,6 +191,20 @@ clips.post("/:roomCode/clips/:clipId/restore", async (c) => {
   ).bind(now, clipId, roomCode).run();
 
   if (!result.meta.changes) return c.json({ message: "Clip not found or not deleted" }, 404);
+
+  // Fetch restored clip and broadcast
+  const row = await c.env.DB.prepare(
+    "SELECT * FROM clips WHERE id = ? AND room_code = ?"
+  ).bind(clipId, roomCode).first<any>();
+  if (row) {
+    const doId = c.env.ROOM.idFromName(roomCode);
+    const stub = c.env.ROOM.get(doId);
+    await stub.fetch("http://internal/broadcast", {
+      method: "POST",
+      body: JSON.stringify({ type: "clip:new", clip: rowToClip(row) }),
+    });
+  }
+
   return c.json({ success: true });
 });
 
@@ -164,7 +213,9 @@ clips.post("/:roomCode/pins/:clipId", async (c) => {
   const roomCode = c.req.param("roomCode");
   const clipId = c.req.param("clipId");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const body = await c.req.json<{ pinned?: boolean }>();
   if (body.pinned) {
@@ -175,6 +226,20 @@ clips.post("/:roomCode/pins/:clipId", async (c) => {
   } else {
     await c.env.DB.prepare("DELETE FROM pinned_clips WHERE room_code = ? AND clip_id = ?").bind(roomCode, clipId).run();
   }
+
+  // Broadcast pin state
+  const pinnedRows = await c.env.DB.prepare(
+    "SELECT clip_id FROM pinned_clips WHERE room_code = ? ORDER BY created_at DESC"
+  ).bind(roomCode).all();
+  const pinnedClipIds = (pinnedRows.results || []).map((r: any) => r.clip_id);
+
+  const doId = c.env.ROOM.idFromName(roomCode);
+  const stub = c.env.ROOM.get(doId);
+  await stub.fetch("http://internal/broadcast", {
+    method: "POST",
+    body: JSON.stringify({ type: "clip:pin", clipId, pinState: !!body.pinned, pinnedClipIds }),
+  });
+
   return c.json({ success: true, pinned: !!body.pinned });
 });
 
@@ -184,7 +249,9 @@ clips.get("/:roomCode/audit", async (c) => {
   if (!user) return c.json({ message: "Unauthorized" }, 401);
   const roomCode = c.req.param("roomCode");
   const token = getRoomToken(c);
-  if (!token || !validateRoomToken(roomCode, token)) return c.json({ message: "Unauthorized" }, 403);
+  if (!token || !(await validateRoomToken(c.env.DB, roomCode, token))) {
+    return c.json({ message: "Unauthorized" }, 403);
+  }
 
   const limit = Math.min(Math.max(parseInt(c.req.query("limit") || "100"), 1), 500);
   const rows = await c.env.DB.prepare(
