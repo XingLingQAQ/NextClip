@@ -11,7 +11,9 @@
     "build": "npm run build:client && npm run build:server",
     "start": "cd go-server && SESSION_SECRET=${SESSION_SECRET} ./bin/server",
     "check": "tsc",
-    "test": "cd go-server && go test ./..."
+    "test": "cd go-server && go test ./...",
+    "deploy:cloudflare": "npm run build:client && cd worker && npx wrangler deploy",
+    "worker:dev": "cd worker && npx wrangler dev"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
