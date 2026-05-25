@@ -7,3 +7,4 @@ vite.config.ts.*
 clipboard.db
 clipboard.db-shm
 clipboard.db-wal
+go-server/bin/

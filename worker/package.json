@@ -1,0 +1,19 @@
+{
+  "name": "nextclip-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 execute nextclip-db --local --file=./migrations/0001_init.sql",
+    "db:migrate:remote": "wrangler d1 execute nextclip-db --remote --file=./migrations/0001_init.sql"
+  },
+  "dependencies": {
+    "hono": "^4.4.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240614.0",
+    "wrangler": "^3.60.0",
+    "typescript": "^5.5.0"
+  }
+}

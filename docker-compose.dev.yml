@@ -1,9 +1,10 @@
 version: "3.9"
 services:
-  cloudclip:
+  # Go backend server
+  server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.go
     ports:
       - "5000:5000"
     environment:
@@ -12,3 +13,19 @@ services:
       SESSION_SECRET: change-me-in-production
     volumes:
       - ./clipboard.db:/app/clipboard.db
+
+  # Development mode: Go server only (client served by vite dev)
+  server-dev:
+    build:
+      context: ./go-server
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: development
+      PORT: 5000
+      SESSION_SECRET: dev-secret
+    volumes:
+      - ./clipboard.db:/app/clipboard.db
+    profiles:
+      - dev
