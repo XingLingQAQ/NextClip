@@ -29,7 +29,7 @@ export default function Auth({ mode }: { mode: "login" | "register" }) {
       setError(t("passwordsNoMatch"));
       return;
     }
-    if (!isLogin && password.length < 4) {
+    if (!isLogin && password.length < 6) {
       setError(t("passwordMinLen"));
       return;
     }
